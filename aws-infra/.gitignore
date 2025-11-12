@@ -1,0 +1,95 @@
+# Terraform ignore file
+# https://www.terraform.io/docs/cli/config/files.html#ignoring-files
+
+# Core Terraform files
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+.terraform.tfstate.lock.info
+crash.log
+crash.*.log
+
+# Terraform plan files
+*.tfplan
+*.tfplan.backup
+
+# Terraform variable files
+*.tfvars
+*.tfvars.json
+!example.tfvars
+!terraform.tfvars.example
+
+# Terraform override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Temporary files
+.terraform-
+*.tmp
+*.bak
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+
+# Backup files
+*.backup
+*.bak
+*.old
+
+# Local environment files
+.env
+.env.local
+.env.*.local
+
+# SSH keys and certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# AWS specific
+.aws/
+.aws-credentials
+
+# Local configuration
+local_config/
+local.*
+
+# Terraform module cache
+.terraform/modules/
+.terraform/providers/
+
+# Terraform Cloud/Enterprise
+.terraform.cloud
+.terraform-enterprise
+
+# Terragrunt (if used)
+terragrunt-cache
+*.tgbackup
+
+# Checkpoint files
+.terraform.tfstate.backup.info
+.terraform.tfstate.*
+checkpoint.*
