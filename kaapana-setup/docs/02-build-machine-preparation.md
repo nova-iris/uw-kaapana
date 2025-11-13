@@ -20,9 +20,9 @@ This guide prepares your build machine to compile Kaapana from source. You can u
 
 ### Minimum Specifications
 - **OS:** Ubuntu 22.04 or 24.04 LTS (x64 ONLY)
-- **CPU:** 8 cores minimum
-- **RAM:** 16GB minimum (32GB recommended)
-- **Disk:** 200GB free space minimum
+- **CPU:** 8 cores minimum (16 cores recommended)
+- **RAM:** 64GB minimum (128GB recommended)
+- **Disk:** 200GB+ free space (build requires ~110GB for images + ~80GB for offline tarball if created)
 - **Network:** Good internet connection (10+ Mbps)
 
 ### Verify System
@@ -38,20 +38,26 @@ uname -m
 
 # Check CPU cores
 nproc
-# Should show: 8+
+# Should show: 8+ (16+ recommended)
 
 # Check RAM
 free -h
-# Should show: 16GB+ total
+# Should show: 64GB+ total (128GB+ recommended)
 
 # Check disk space
 df -h /
 # Should show: 200GB+ available
 ```
 
+**⚠️ Important Disk Space Note:**
+- Docker images will be stored at `/var/lib/docker/`
+- Complete build requires ~90GB (~110GB with build cache)
+- Creating offline installation tarball requires ~80GB additional space
+- Total recommended: 200GB+ free space
+
 ---
 
-## Step 1: System Update
+## Step 1: System Update and Core Dependencies
 
 ```bash
 # Update package lists
@@ -60,74 +66,94 @@ sudo apt update
 # Upgrade all packages
 sudo apt upgrade -y
 
-# Install essential build tools
+# Install essential build requirements
 sudo apt install -y \
-  nano \
   curl \
   git \
-  wget \
   python3 \
-  python3-pip \
-  python3-venv \
-  build-essential \
-  htop \
-  net-tools \
-  unzip
+  python3-pip
 
-# Verify installations
+# Verify core installations
 python3 --version  # Should be 3.10+
 git --version
 curl --version
 ```
 
+**Note:** This follows the official Kaapana build requirements. Additional tools like `jq` and `screen` can be installed if needed for your workflow.
+
 ---
 
-## Step 2: Install Snap
+## Step 2: Install AWS CLI (Required for ECR)
 
-Snap is required for Docker and Helm installation.
-
+**Install AWS CLI v2:**
 ```bash
-# Check if snap is installed
-snap version
+# Download and install AWS CLI
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+unzip awscliv2.zip
+sudo ./aws/install
 
-# If not installed:
-sudo apt install -y snapd
-
-# Enable and start snapd
-sudo systemctl enable snapd
-sudo systemctl start snapd
-
-# Create symbolic link (if needed)
-sudo ln -s /var/lib/snapd/snap /snap
-
-# Verify
-snap version
+# Verify installation
+aws --version
 ```
 
-**⚠️ Important:** If snap was just installed, **reboot is required**:
-```bash
-sudo reboot
+**Expected output:**
+```
+aws-cli/2.31.35 Python/3.13.9 Linux/6.14.0-1016-aws exe/x86_64.ubuntu.24
 ```
 
-After reboot, reconnect and continue.
+**Configure AWS CLI (if not using IAM role):**
+```bash
+aws configure
+# Enter your AWS Access Key ID
+# Enter your AWS Secret Access Key
+# Enter default region: us-east-1
+# Enter default output format: json
+```
+
+**Verify AWS credentials:**
+```bash
+# If using EC2 with IAM role (recommended):
+aws sts get-caller-identity
+# Should show your AWS account and role information
+```
+
+**Expected output:**
+```json
+{
+    "UserId": "AROA...:i-097dedda497eea74d",
+    "Account": "223271671018",
+    "Arn": "arn:aws:sts::223271671018:assumed-role/kaapana-poc-poc-ec2-role/i-097dedda497eea74d"
+}
+```
 
 ---
 
 ## Step 3: Install Docker
 
+**Add Docker's official repository and install:**
 ```bash
-# Install Docker via Snap
-sudo snap install docker --classic --channel=latest/stable
+# Add Docker's official GPG key
+sudo apt-get update
+sudo apt-get install -y ca-certificates curl
+sudo install -m 0755 -d /etc/apt/keyrings
+sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+# Add Docker repository
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+  $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
+  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker Engine
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Verify Docker installation
 docker --version
-
-# Test Docker (this will fail initially - that's expected)
-docker run hello-world
-# Error: permission denied (expected)
 ```
 
-**Configure Docker permissions:**
+**Configure Docker for non-root access:**
 ```bash
 # Create docker group (if not exists)
 sudo groupadd docker 2>/dev/null || true
@@ -135,10 +161,10 @@ sudo groupadd docker 2>/dev/null || true
 # Add current user to docker group
 sudo usermod -aG docker $USER
 
-# Fix Docker socket permissions for Snap Docker
-sudo chown root:docker /var/run/docker.sock
+# Activate group membership for current session
+newgrp docker
 
-# Test Docker again (should work now)
+# Verify Docker works without sudo
 docker run hello-world
 ```
 
@@ -156,25 +182,41 @@ docker info | head -20
 # Check Docker images
 docker images
 
-# Check Docker storage location
-docker info | grep "Docker Root Dir"
+# Check Docker data location
+ls -lh /var/lib/docker/
 ```
 
 ---
 
 ## Step 4: Install Helm
 
+**Add Helm's official repository and install:**
 ```bash
-# Install Helm via Snap
-sudo snap install helm --classic --channel=latest/stable
+# Install dependencies
+sudo apt-get install -y curl gpg apt-transport-https
+
+# Add Helm GPG key
+curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+
+# Add Helm repository
+echo "deb [signed-by=/usr/share/keyrings/helm.gpg] https://packages.buildkite.com/helm-linux/helm-debian/any/ any main" | \
+  sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+
+# Install Helm
+sudo apt-get update
+sudo apt-get install -y helm
 
 # Verify Helm installation
 helm version
+```
 
-# Install Helm kubeval plugin
+**Install Helm kubeval plugin:**
+```bash
 helm plugin install https://github.com/instrumenta/helm-kubeval
+```
 
-# Verify plugin
+**Verify plugin installation:**
+```bash
 helm plugin list
 ```
 
@@ -186,51 +228,9 @@ kubeval 0.x.x   Validate Helm charts against Kubernetes schemas
 
 ---
 
-## Step 5: Install Python Build Dependencies
+## Step 5: Clone Kaapana Repository
 
 ```bash
-# Create working directory
-mkdir -p ~/kaapana-build
-cd ~/kaapana-build
-
-# Create Python virtual environment
-python3 -m venv kaapana-venv
-
-# Activate virtual environment
-source kaapana-venv/bin/activate
-
-# Verify activation (prompt should show (kaapana-venv))
-which python3
-# Should show: /home/ubuntu/kaapana-build/kaapana-venv/bin/python3
-
-# Upgrade pip
-pip install --upgrade pip
-
-# Install basic Python build tools
-pip install wheel setuptools
-```
-
-**Make activation easy:**
-```bash
-# Add alias to bashrc
-echo "alias activate-kaapana='source ~/kaapana-build/kaapana-venv/bin/activate'" >> ~/.bashrc
-source ~/.bashrc
-
-# Test alias
-activate-kaapana
-```
-
----
-
-## Step 6: Clone Kaapana Repository
-
-```bash
-# Ensure you're in build directory
-cd ~/kaapana-build
-
-# Activate venv
-source kaapana-venv/bin/activate
-
 # Clone Kaapana repository (master branch)
 git clone -b master https://github.com/kaapana/kaapana.git
 
@@ -256,39 +256,86 @@ kaapana/
 
 ---
 
-## Step 7: Install Kaapana Build Requirements
+## Step 6: Setup Python Virtual Environment (Recommended)
 
+**Why use a virtual environment?**
+- Best practice for Python dependency management
+- Isolates Kaapana build dependencies from system packages
+- On Ubuntu 24.04+, installing packages with pip outside a virtual environment may result in errors (PEP 668)
+
+**Install venv package (if not already installed):**
 ```bash
-# Navigate to build-scripts
-cd ~/kaapana-build/kaapana/build-scripts
+sudo apt install -y python3-venv
+```
 
-# Ensure venv is activated
-source ~/kaapana-build/kaapana-venv/bin/activate
+**Create virtual environment:**
+```bash
+# Navigate to Kaapana directory
+cd ~/kaapana
+
+# Create virtual environment (only needed once)
+python3 -m venv .venv
+```
+
+**Activate virtual environment:**
+```bash
+# Activate the virtual environment
+source ~/kaapana/.venv/bin/activate
+
+# Verify activation (prompt should show (.venv))
+which python3
+# Should show: /home/ubuntu/kaapana/.venv/bin/python3
+```
+
+**Make activation easy:**
+```bash
+# Add alias to bashrc for quick activation
+echo "alias activate-kaapana='source ~/kaapana/.venv/bin/activate'" >> ~/.bashrc
+source ~/.bashrc
+
+# Test alias
+activate-kaapana
+```
+
+---
+
+## Step 7: Install Python Build Requirements
+
+**Ensure virtual environment is activated:**
+```bash
+source ~/kaapana/.venv/bin/activate
+```
+
+**Install Kaapana build requirements:**
+```bash
+# Navigate to build-scripts directory
+cd ~/kaapana/build-scripts
 
 # Install Python requirements
-pip install -r requirements.txt
+python3 -m pip install -r requirements.txt
 
 # Verify key packages installed
-pip list | grep -E "docker|PyYAML|jinja2|click"
-
-# Note: docker Python package is not in requirements.txt but may be needed
-pip install docker  # If docker package is expected
+pip list | grep -E "PyYAML|jinja2|click|docker"
 ```
 
 **Expected packages:**
-- docker
 - PyYAML
 - Jinja2
 - click
+- docker
 - requests
-- (and others)
+- (and others as specified in requirements.txt)
+
+---
 
 ---
 
 ## Step 8: Verify Build Environment
 
 **Run verification script:**
+
 ```bash
+# Create verification script
 cat > ~/verify-build-env.sh << 'EOF'
 #!/bin/bash
 echo "=== Build Environment Verification ==="
@@ -302,7 +349,16 @@ echo ""
 # Resources
 echo "CPU Cores: $(nproc)"
 echo "RAM: $(free -h | grep Mem | awk '{print $2}')"
-echo "Disk Space: $(df -h / | tail -1 | awk '{print $4}')"
+echo "Root Disk Space: $(df -h / | tail -1 | awk '{print $4}')"
+echo "Docker Disk Space: $(df -h /var/lib/docker | tail -1 | awk '{print $4}')"
+echo ""
+
+# Snap
+echo "Snap: $(snap version | head -1 2>/dev/null || echo 'NOT INSTALLED')"
+echo ""
+
+# Snap
+echo "Snap: $(snap version | head -1 2>/dev/null || echo 'NOT INSTALLED')"
 echo ""
 
 # Tools
@@ -322,16 +378,16 @@ fi
 echo ""
 
 # Kaapana Repo
-if [ -d ~/kaapana-build/kaapana ]; then
+if [ -d ~/kaapana ]; then
   echo "✅ Kaapana repository cloned"
-  echo "   Location: ~/kaapana-build/kaapana"
+  echo "   Location: ~/kaapana"
 else
   echo "❌ Kaapana repository not found"
 fi
 echo ""
 
 # Python venv
-if [ -d ~/kaapana-build/kaapana-venv ]; then
+if [ -d ~/kaapana/.venv ]; then
   echo "✅ Python virtual environment created"
 else
   echo "❌ Python virtual environment not found"
@@ -339,8 +395,9 @@ fi
 echo ""
 
 # Build requirements
-if source ~/kaapana-build/kaapana-venv/bin/activate && python3 -c "import docker, yaml, jinja2" 2>/dev/null; then
+if source ~/kaapana/.venv/bin/activate && python3 -c "import docker, yaml, jinja2" 2>/dev/null; then
   echo "✅ Python build requirements installed"
+  deactivate
 else
   echo "❌ Python build requirements missing"
 fi
@@ -360,13 +417,16 @@ chmod +x ~/verify-build-env.sh
 OS: Ubuntu 24.04.x LTS
 Architecture: x86_64
 
-CPU Cores: 8
-RAM: 62Gi
-Root Disk Space: 3.5G
-Data Disk Space: 467G
+CPU Cores: 16
+RAM: 64Gi
+Root Disk Space: 180G
+Docker Disk Space: 180G
 
-Docker: Docker version 28.x.x
-Helm: v3.19.x
+Snap: snap    2.63
+snapd  2.63
+
+Docker: Docker version 27.x.x, build xxxxxxx
+Helm: v3.x.x
 Git: git version 2.43.x
 Python: Python 3.12.x
 
@@ -374,7 +434,7 @@ Docker Test:
   ✅ Docker working (no sudo required)
 
 ✅ Kaapana repository cloned
-   Location: ~/kaapana-build/kaapana
+   Location: ~/kaapana
 
 ✅ Python virtual environment created
 
@@ -383,29 +443,10 @@ Docker Test:
 === Verification Complete ===
 ```
 
-**⚠️ Important Note:** The verification script now checks both root and data disk space. If Data Disk Space shows "NOT MOUNTED", follow the "Out of disk space" troubleshooting section to mount additional storage.
-
----
-
-## Step 9: Optional - Reboot for Clean State
-
-**Recommended before starting build:**
-```bash
-# Reboot to ensure all changes applied
-sudo reboot
-```
-
-**After reboot, verify everything still works:**
-```bash
-# Reconnect via SSH (key should be configured in ssh-agent or use -i if needed)
-ssh ubuntu@$ELASTIC_IP
-
-# Quick verification
-docker run --rm hello-world
-helm version
-source ~/kaapana-build/kaapana-venv/bin/activate
-python3 -c "import docker; print('Python OK')"
-```
+**⚠️ Important Notes:**
+- Ensure Docker Disk Space shows at least 200GB free at `/var/snap/docker/common/var-lib-docker/`
+- Complete build requires ~90GB (~110GB with cache) + ~80GB if creating offline tarball
+- If disk space is insufficient, follow the "Out of disk space" troubleshooting section
 
 ---
 
@@ -413,86 +454,147 @@ python3 -c "import docker; print('Python OK')"
 
 ### Docker permission denied
 ```bash
-# For Snap Docker installations, fix socket permissions
-sudo chown root:docker /var/run/docker.sock
-
 # Add user to docker group again
 sudo usermod -aG docker $USER
 
-# Restart Docker service
-sudo snap restart docker.dockerd
+# Apply group membership immediately
+newgrp docker
 
 # Test again
 docker run hello-world
 
-# Or logout and login again
+# Or logout and login again for group changes to take effect
 exit
 # Then SSH back in
 ```
 
-### Docker service not found
+### Python virtual environment issues
 ```bash
-# For Snap Docker, check snap services instead
-sudo snap services docker
+# If venv creation fails, ensure python3-venv is installed
+sudo apt install -y python3-venv
 
-# Restart if needed
-sudo snap restart docker.dockerd
+# Remove existing venv and recreate
+rm -rf ~/kaapana/.venv
+cd ~/kaapana
+python3 -m venv .venv
 
-# Check status
-sudo snap services docker
-```
-
-### Snap not working after install
-```bash
-# Snap requires reboot
-sudo reboot
-
-# After reboot, verify
-snap version
+# Activate and verify
+source ~/kaapana/.venv/bin/activate
+which python3
 ```
 
 ### Python packages not found
 ```bash
 # Ensure venv is activated
-source ~/kaapana-build/kaapana-venv/bin/activate
+source ~/kaapana/.venv/bin/activate
 
-# Check prompt - should show (kaapana-venv)
+# Check prompt - should show (.venv)
 which python3
 
-# Reinstall if needed
-pip install -r ~/kaapana-build/kaapana/build-scripts/requirements.txt
+# Upgrade pip first
+python3 -m pip install --upgrade pip
+
+# Reinstall requirements
+cd ~/kaapana/build-scripts
+python3 -m pip install -r requirements.txt
+
+# Verify installation
+pip list | grep -E "PyYAML|jinja2|docker"
 ```
 
 ### Out of disk space
-```bash
-# Check space and volumes
-df -h
-lsblk
 
-# If AWS instance has additional unmounted volumes (common):
-# 1. Check for unmounted volumes
+**⚠️ CRITICAL:** Kaapana build requires significant disk space. Plan accordingly BEFORE building.
+
+**Space Requirements:**
+- Build phase: ~90GB for 90+ container images
+- Build cache: ~20GB additional
+- Optional offline tarball: ~80GB additional
+- **Total required: 200GB+ free space (300GB+ recommended)**
+
+**Check current usage:**
+```bash
+# Check available space
+df -h /
+df -h /var/snap/docker/common/
+
+# Check Docker current usage
+du -sh /var/snap/docker/common/var-lib-docker/
+docker system df
+
+# Identify what's using space
+docker images --format "table {{.Repository}}\t{{.Size}}" | sort -k3 -h
+```
+
+**Option 1: Expand AWS Root Volume (Recommended for Single Volume Setup)**
+
+```bash
+# 1. AWS Console → EC2 → Volumes
+#    - Select root volume (e.g., /dev/nvme0n1)
+#    - Click "Modify Volume"
+#    - Increase size to 300GB or 500GB
+# 2. Wait 5-10 minutes for volume to expand
+# 3. On server:
+
+sudo growpart /dev/nvme0n1 1
+sudo resize2fs /dev/nvme0n1p1
+
+# Verify new size
+df -h /
+# Should now show 300GB+ available
+```
+
+**Option 2: Use Additional AWS Volume (if available)**
+
+```bash
+# Check for unmounted volumes
 sudo lsblk -f
 sudo file -s /dev/nvme1n1  # Check second disk
 
-# 2. If additional disk exists and is uninitialized, format and mount:
+# If additional disk exists and is uninitialized:
 sudo mkfs.ext4 /dev/nvme1n1
-sudo mkdir -p /data
-sudo mount /dev/nvme1n1 /data
-sudo chown ubuntu:ubuntu /data
+sudo mkdir -p /mnt/docker-storage
+sudo mount /dev/nvme1n1 /mnt/docker-storage
+sudo chown ubuntu:ubuntu /mnt/docker-storage
 
-# 3. Add to fstab for persistent mounting
-echo '/dev/nvme1n1 /data ext4 defaults,nofail 0 2' | sudo tee -a /etc/fstab
+# Verify
+df -h /mnt/docker-storage
 
-# 4. Verify new space
-df -h /data
+# Add to fstab for persistent mounting after reboot
+echo '/dev/nvme1n1 /mnt/docker-storage ext4 defaults,nofail 0 2' | sudo tee -a /etc/fstab
+```
 
-# If root volume needs expansion:
-# 1. AWS Console → EC2 → Volumes → Modify Volume
-# 2. Increase size to 300GB or 500GB
-# 3. On server:
-sudo growpart /dev/nvme0n1 1
-sudo resize2fs /dev/nvme0n1p1
-df -h  # Verify new size
+**Option 3: Clean Before Build (Limited help on first build)**
+
+```bash
+# Remove unused Docker images and build cache
+docker system prune -af
+
+# Check space freed
+df -h /
+
+# This only helps if you have old builds from previous attempts
+```
+
+**If you run out of space DURING the build:**
+
+```bash
+# 1. Stop the build immediately
+# Press Ctrl+C (if in screen: Ctrl+A then K)
+
+# 2. Clean Docker build cache (safe to do while build is stopped)
+docker builder prune -af
+
+# 3. Check freed space
+df -h /
+
+# 4. Either expand volume (Option 1) or use additional volume (Option 2)
+
+# 5. Restart the build:
+cd ~/kaapana
+source ~/.venv/bin/activate
+cd build-scripts
+python3 start_build.py --config build-config.yaml --build-only --parallel 4
 ```
 
 ---
@@ -501,17 +603,21 @@ df -h  # Verify new size
 
 Before proceeding to the build process, verify:
 
-- [x] Ubuntu 22.04 or 24.04 LTS installed
-- [x] At least 8 CPU cores
-- [x] At least 16GB RAM (preferably 64GB if AWS instance)
-- [x] At least 200GB free disk space
-- [x] Docker installed and working without sudo
-- [x] Helm installed with kubeval plugin
-- [x] Git installed
-- [x] Python 3.10+ with venv
-- [x] Kaapana repository cloned
-- [x] Python build requirements installed
-- [x] Internet connectivity working
+- [ ] Ubuntu 22.04 or 24.04 LTS installed (x64 only)
+- [ ] At least 8 CPU cores (16+ recommended)
+- [ ] At least 64GB RAM (128GB recommended)
+- [ ] At least 200GB free disk space (for build + cache + optional offline tarball)
+- [ ] AWS CLI v2 installed and configured
+- [ ] AWS credentials working (IAM role or access keys)
+- [ ] Docker installed from official repository and working without sudo
+- [ ] Helm installed from official repository with kubeval plugin
+- [ ] Git and Python 3.10+ installed
+- [ ] Kaapana repository cloned to ~/kaapana
+- [ ] Python virtual environment created at ~/kaapana/.venv
+- [ ] Python build requirements installed in virtual environment
+- [ ] Verification script passed all checks
+- [ ] Internet connectivity working
+- [ ] ECR access configured (if using AWS ECR for container registry)
 
 ---
 
@@ -525,5 +631,19 @@ You'll configure the build settings and execute the Kaapana build process (~1 ho
 
 ---
 
+## Reference Documentation
+
+This guide is based on the official Kaapana documentation:
+
+- **Kaapana Build Guide:** https://kaapana.readthedocs.io/en/latest/installation_guide/build.html
+- **Kaapana Requirements:** https://kaapana.readthedocs.io/en/latest/installation_guide/requirements.html
+- **Docker Installation (Linux):** https://docs.docker.com/engine/install/ubuntu/
+- **Docker Post-Install (Linux):** https://docs.docker.com/engine/install/linux-postinstall/
+- **Helm Installation:** https://helm.sh/docs/intro/install/
+- **Kaapana GitHub Repository:** https://github.com/kaapana/kaapana
+
+---
+
 **Document Status:** ✅ Complete  
+**Last Updated:** Using official Docker and Helm repositories (no snap required)  
 **Next Document:** 03-kaapana-build-process.md

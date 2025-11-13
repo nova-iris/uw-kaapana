@@ -25,6 +25,22 @@ module "ec2_instance" {
 
   
   
+  # Root volume configuration
+  root_block_device = [
+    {
+      volume_type           = "gp3"
+      volume_size           = var.root_volume_size
+      delete_on_termination = true
+      encrypted             = var.enable_ebs_encryption
+      kms_key_id            = var.enable_ebs_encryption ? var.kms_key_id : null
+      iops                  = 3000
+      throughput            = 125
+      tags = {
+        Name = "${var.project_name}-${var.environment}-root-volume"
+      }
+    }
+  ]
+
   # User data for instance initialization
   user_data = var.user_data
 

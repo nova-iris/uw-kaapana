@@ -7,12 +7,28 @@ output "vpc_cidr" {
 # EC2 Outputs
 output "instance_id" {
   description = "ID of the created EC2 instance"
-  value       = module.ec2.instance_id
+  value       = module.ec2.id
 }
 
 output "instance_public_ip" {
   description = "Public IP address of the EC2 instance"
-  value       = module.ec2.instance_public_ip
+  value       = module.ec2.public_ip
+}
+
+# Secondary EC2 Outputs
+output "secondary_instance_id" {
+  description = "ID of the secondary EC2 instance (if created)"
+  value       = var.enable_secondary_instance ? module.ec2_secondary[0].id : null
+}
+
+output "secondary_instance_public_ip" {
+  description = "Public IP address of the secondary EC2 instance (if created)"
+  value       = var.enable_secondary_instance ? module.ec2_secondary[0].public_ip : null
+}
+
+output "secondary_instance_enabled" {
+  description = "Whether the secondary instance is enabled"
+  value       = var.enable_secondary_instance
 }
 
 # Elastic IP Outputs
@@ -21,13 +37,34 @@ output "elastic_ip" {
   value       = module.elastic_ip.elastic_ip
 }
 
+# ECR Outputs
+output "ecr_repository_url" {
+  description = "URL of the ECR repository for Kaapana images"
+  value       = module.ecr[0].ecr_repository_url
+}
+
+output "ecr_repository_name" {
+  description = "Name of the ECR repository"
+  value       = module.ecr[0].ecr_repository_name
+}
+
 # Connection Information
 output "connection_info" {
-  description = "Connection information for the instance"
+  description = "Connection information for the primary instance"
   value = {
     ssh_host = module.elastic_ip.elastic_ip
     ssh_user = "ubuntu"
     ssh_key  = "${var.key_name}.pem"
     url      = "https://${module.elastic_ip.elastic_ip}"
   }
+}
+
+output "secondary_connection_info" {
+  description = "Connection information for the secondary instance (if created)"
+  value = var.enable_secondary_instance ? {
+    ssh_host = module.ec2_secondary[0].public_ip
+    ssh_user = "ubuntu"
+    ssh_key  = "${var.key_name}.pem"
+    url      = "http://${module.ec2_secondary[0].public_ip}"
+  } : null
 }

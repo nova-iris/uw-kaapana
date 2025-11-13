@@ -131,6 +131,36 @@ resource "aws_iam_role_policy" "cloudwatch" {
   })
 }
 
+# IAM policy for ECR access
+resource "aws_iam_role_policy" "ecr" {
+  name = "${var.project_name}-${var.environment}-ecr"
+  role = aws_iam_role.ec2.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr:GetAuthorizationToken",
+          "ecr:BatchCheckLayerAvailability",
+          "ecr:GetDownloadUrlForLayer",
+          "ecr:GetRepositoryPolicy",
+          "ecr:DescribeRepositories",
+          "ecr:ListImages",
+          "ecr:DescribeImages",
+          "ecr:BatchGetImage",
+          "ecr:InitiateLayerUpload",
+          "ecr:UploadLayerPart",
+          "ecr:CompleteLayerUpload",
+          "ecr:PutImage"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # ==========================================
 # Security Group using terraform-aws-modules/security-group
 # ==========================================

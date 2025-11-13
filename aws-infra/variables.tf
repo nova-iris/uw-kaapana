@@ -25,7 +25,7 @@ variable "instance_type" {
 variable "root_volume_size" {
   description = "Size of the root volume in GB"
   type        = number
-  default     = 50
+  default     = 100
 }
 
 variable "data_volume_size" {
@@ -86,6 +86,24 @@ variable "key_name" {
   description = "Name of the EC2 key pair"
   type        = string
   default     = "kaapana-poc-key"
+}
+
+variable "allowed_principal_arns" {
+  description = "List of AWS principal ARNs allowed to access ECR repository"
+  type        = list(string)
+  default     = []
+}
+
+variable "enable_secondary_instance" {
+  description = "Enable creation of secondary EC2 instance"
+  type        = bool
+  default     = true
+}
+
+variable "secondary_root_volume_size" {
+  description = "Size of the secondary instance root volume in GB"
+  type        = number
+  default     = 500
 }
 
 variable "tags" {
