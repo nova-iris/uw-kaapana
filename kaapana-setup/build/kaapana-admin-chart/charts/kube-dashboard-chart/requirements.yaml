@@ -1,0 +1,6 @@
+---
+dependencies:
+#   - name: metrics-scraper-chart
+#     version: 0.0.0
+  - name: kube-state-metrics-chart
+    version: 0.0.0

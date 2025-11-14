@@ -1,0 +1,76 @@
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: maintenancepage
+  namespace: "{{ .Values.global.admin_namespace }}"
+  labels:
+    app.kubernetes.io/name: maintenancepage
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: maintenancepage
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: maintenancepage
+    spec:
+      containers:
+      - name: maintenancepage
+        image: "{{ .Values.global.registry_url }}/maintenance-page-kaapana:{{ .Values.global.kaapana_build_version  }}"
+        imagePullPolicy:  {{ .Values.global.pull_policy_pods }}
+        ports:
+        - name: maintn-http
+          containerPort: 5000
+        livenessProbe:
+          httpGet:
+            path: /maintenance
+            port: maintn-http
+          initialDelaySeconds: 10
+          periodSeconds: 20
+        resources:
+{{- if .Values.global.dev_files }}
+          requests:
+            memory: 1Gi
+          limits:
+            memory: 10Gi
+ {{- else }}
+          requests:
+            memory: 10Mi
+          limits:
+            memory: 10Mi
+ {{- end }}
+        volumeMounts:
+          - name: common-data-file
+            mountPath: /app/jsons
+          - name: tmp
+            mountPath: /var/run
+          - name: cache
+            mountPath: /var/cache/nginx
+{{- if .Values.global.dev_files }}
+          - name: maintenance-dev-files
+            mountPath: /kaapana/app/src
+ {{- end }}
+        securityContext:
+          allowPrivilegeEscalation: false
+  {{- if .Values.global.dev_files }}
+          readOnlyRootFilesystem: false
+  {{- else }}
+          readOnlyRootFilesystem: true
+  {{- end }}
+      volumes:
+      - name: common-data-file
+        configMap:
+          name: maintenance-page-config
+      - name: cache
+        emptyDir: {}
+      - name: tmp
+        emptyDir: {}
+{{- if .Values.global.dev_files }}
+      - name: maintenance-dev-files
+        persistentVolumeClaim:
+          claimName: {{ .Chart.Name }}-dev-pv-claim
+{{- end }}
+      imagePullSecrets:
+      - name: registry-secret

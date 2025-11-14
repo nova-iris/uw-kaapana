@@ -1,0 +1,24 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-backend-service
+  namespace: "{{ .Values.global.helm_namespace }}"
+  labels:
+    app.kubernetes.io/name: auth-backend
+spec:
+  selector:
+    app.kubernetes.io/name: auth-backend
+  ports:
+  {{- if .Values.global.dev_files }}
+    - name: auth-check-http
+      port: 5000 
+      targetPort: 5000
+      nodePort: 5001 # only for development!
+  type: NodePort # only for development!
+  {{- else }}
+    - name: auth-check-http
+      port: 5000 
+      targetPort: 5000
+  type: ClusterIP
+  {{- end }}

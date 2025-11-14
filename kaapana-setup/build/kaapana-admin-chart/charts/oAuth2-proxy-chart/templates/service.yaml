@@ -1,0 +1,16 @@
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: oauth2-proxy-service
+  namespace: "{{  .Values.global.helm_namespace  }}"
+spec:
+  selector:
+    app.kubernetes.io/name: oauth2-proxy
+  type: NodePort
+  ports:
+    - protocol: TCP
+      port: {{ .Values.global.https_port }}
+      nodePort: {{ .Values.global.https_port }}
+      targetPort: https
+      name: https-port

@@ -2,17 +2,37 @@
 
 **Phase:** 4 - Test & Verify  
 **Duration:** 30-60 minutes  
-**Prerequisite:** 06-platform-deployment.md completed
+**Prerequisite:** 10-core-modules-configuration.md completed  
+**Related Milestone:** Milestone 3 - Core Modules Configuration
 
 ---
 
 ## Overview
 
-This guide tests Kaapana's core DICOM functionality:
-- Uploading DICOM images via UI and DICOM protocol
-- Storing images in dcm4chee PACS
-- Viewing images in OHIF viewer
-- Verifying metadata in OpenSearch
+This guide tests Kaapana's complete data ingestion pipeline following the official [Data Upload documentation](https://kaapana.readthedocs.io/en/latest/user_guide/workflow_management_system/data_upload.html):
+
+- **DICOM upload** via DICOM DIMSE protocol (port 11112) and web interface
+- **Automatic processing** through Clinical Trial Processor (CTP)
+- **Metadata extraction** and indexing in OpenSearch
+- **Thumbnail generation** and storage in MinIO
+- **Data validation** with dciodvfy/pydicom-validator
+- **Visualization** in Datasets Gallery View and OHIF viewer
+- **Project assignment** for data isolation
+
+### Understanding Kaapana's Ingestion Pipeline
+
+When DICOM data arrives at Kaapana (via DIMSE or web upload), the following happens automatically:
+
+1. **CTP Reception:** Data received by Clinical Trial Processor
+2. **PACS Storage:** Saved to dcm4chee PACS
+3. **Metadata Indexing:** DICOM tags indexed in OpenSearch (project-specific)
+4. **Series-Project Mapping:** Series associated with target project + admin project
+5. **Thumbnail Generation:** Preview images created and stored in MinIO
+6. **Validation:** DICOM compliance checked, warnings/errors recorded
+
+**Official Documentation:**
+- User Guide - Data Upload: https://kaapana.readthedocs.io/en/latest/user_guide/workflow_management_system/data_upload.html
+- Store Components: https://kaapana.readthedocs.io/en/latest/user_guide/store.html
 
 ---
 
@@ -20,16 +40,61 @@ This guide tests Kaapana's core DICOM functionality:
 
 ```bash
 # SSH to AWS server
-ssh -i kaapana-poc-key.pem ubuntu@$ELASTIC_IP
+ssh -i kaapana-poc-key.pem ubuntu@52.23.80.12
 
 # Verify all pods running
-kubectl get pods -n kaapana | grep -v "1/1.*Running"
-# Should return empty (all pods running)
+kubectl get pods -A | grep -E "services|kaapana"
 
 # Verify Kaapana UI accessible
-curl -s -o /dev/null -w "%{http_code}" http://localhost/
+curl -k -s -o /dev/null -w "%{http_code}" https://kaapana.novairis.site/
 # Should return: 200 or 302
+
+# Verify DICOM receiver port
+nc -zv kaapana.novairis.site 11112
+# Should show: succeeded
+
+# Ensure you're in admin project or have a project selected
 ```
+
+---
+
+## Step 0: Understanding Projects and Datasets
+
+**Before uploading data, understand Kaapana's project-based data organization:**
+
+### Projects in Kaapana
+
+**Projects provide data isolation and multi-tenancy.** Each DICOM series belongs to one or more projects, and users only see data from their assigned projects.
+
+**When uploading via DICOM DIMSE:**
+- The `--call` parameter specifies the target project (e.g., `kp-admin`)
+- Project must exist before upload
+- Use `kp-admin` for the default admin project
+
+**When uploading via web interface:**
+- Data is uploaded to the currently selected project
+- Select project from dropdown in top-right corner
+
+**Learn more:**
+- Projects Documentation: https://kaapana.readthedocs.io/en/latest/user_guide/system/projects.html
+
+### Datasets View
+
+After data upload, you'll view and interact with data in the **Datasets Gallery View**:
+
+**Features:**
+- Gallery-style thumbnails of DICOM series
+- Metadata cards with patient/study/series information
+- Multi-select for batch operations
+- Full-text search across DICOM tags
+- Filter by modality, date, patient, etc.
+- Direct access to OHIF viewer
+- Workflow execution from selected data
+
+**Access:** Workflows → Datasets
+
+**Learn more:**
+- Datasets Documentation: https://kaapana.readthedocs.io/en/latest/user_guide/workflow_management_system/datasets.html
 
 ---
 
@@ -221,58 +286,65 @@ http://YOUR_ELASTIC_IP/
 
 ---
 
-## Step 3: Upload DICOM via DICOM Protocol (dcmsend)
+## Step 3: Upload DICOM via DICOM Protocol (dcmsend) - Recommended
+
+### Why DICOM DIMSE is Preferred
+
+**DICOM DIMSE (port 11112) is the recommended upload method because:**
+- Native DICOM protocol, standard in medical imaging
+- Reliable and well-tested
+- Used in production hospital environments
+- Supports batch uploads with directory scanning
+- Automatic retry and error handling
+
+**Official Documentation Format:**
+
+According to [Kaapana Data Upload docs](https://kaapana.readthedocs.io/en/latest/user_guide/workflow_management_system/data_upload.html#option-1-sending-images-via-dicom-dimse-preferred), the command format is:
+
+```bash
+dcmsend -v <ip-address-or-hostname-of-server> 11112 \
+  --aetitle kp-<dataset-name> \
+  --call kp-<project-name> \
+  --scan-directories \
+  --scan-pattern '*.dcm' \
+  --recurse <data-dir-of-DICOM-images>
+```
+
+**Parameter Explanation:**
+- `--aetitle kp-<dataset-name>`: Specifies the **dataset**. If the dataset exists, new images append to it
+- `--call kp-<project-name>`: Specifies the **project**. Project must exist (use `admin` as default)
+- `--scan-directories`: Recursively scan directories
+- `--scan-pattern '*.dcm'`: Pattern for DICOM files
+- `--recurse`: Scan subdirectories
+
+ **Important:** Visit Workflows → Data Upload wizard in the web interface to get a command tailored to your deployment with correct hostname and parameters.
 
 ### Install DICOM Toolkit
 
 ```bash
-# On AWS server
+# On AWS server or local machine
 sudo apt update
 sudo apt install -y dcmtk
 
 # Verify installation
 dcmsend --version
-storescu --version
 ```
 
-### Send DICOM Files to dcm4chee
+### Upload DICOM Files to Kaapana
+
+#### Method 1: Direct Upload (From Any Machine)
 
 ```bash
-# Navigate to DICOM samples
-cd ~/dicom-samples
-
-# Get dcm4chee DICOM service details
-kubectl get svc dcm4chee-arc -n kaapana
-
-# Typically:
-# - AE Title: DCM4CHEE
-# - Port: 11112
-
-# Send DICOM files
-# Replace <pod-ip> with actual dcm4chee service IP
-DICOM_SVC_IP=$(kubectl get svc dcm4chee-arc -n kaapana -o jsonpath='{.spec.clusterIP}')
-echo "dcm4chee DICOM service: $DICOM_SVC_IP:11112"
-
-# Send files from inside a pod (easier than external access)
-kubectl run dcm-sender \
-  --image=dcmtk:latest \
-  --rm -it \
-  --restart=Never \
-  --namespace kaapana \
-  -- bash
-
-# Inside pod, send DICOM:
-# (You'll need to copy files into the pod first - see alternative below)
-```
-
-**Alternative: Send from AWS server using port-forward:**
-
-```bash
-# Port-forward dcm4chee DICOM port
-kubectl port-forward -n kaapana svc/dcm4chee-arc 11112:11112 &
-
-# Send DICOM files
+# Navigate to your DICOM data directory
 cd ~/dicom-samples/ct-sample  # or your DICOM directory
+
+# Send to admin project with dataset name "poc-test-data"
+dcmsend -v kaapana.novairis.site 11112 \
+  --aetitle kp-poc-test-data \
+  --call kp-admin \
+  --scan-directories \
+  --scan-pattern '*.dcm' \
+  --recurse .
 
 # Send all DICOM files
 find . -name "*.dcm" -exec dcmsend localhost 11112 -aec DCM4CHEE {} +
@@ -288,25 +360,179 @@ dcmsend localhost 11112 -aec DCM4CHEE *.dcm
 # I: status code: 0 (Success)
 # ... (repeated for each file)
 # I: Releasing Association
-
-# Stop port-forward
-kill %1
 ```
 
-### Verify DICOM Upload
+**Expected Results:**
+- All files uploaded successfully (status code: 0)
+- Association established and released properly
+- No errors in output
+
+#### Method 2: Upload to Different Project
 
 ```bash
-# Check dcm4chee logs for received studies
-kubectl logs -l app=dcm4chee -n kaapana --tail=50 | grep -i "store"
+# If you created a test-project in Step 10:
+dcmsend -v kaapana.novairis.site 11112 \
+  --aetitle kp-test-dataset \
+  --call kp-test-project \
+  --scan-directories \
+  --scan-pattern '*.dcm' \
+  --recurse ~/dicom-samples/ct-sample/
+```
 
-# Should show log entries like:
-# Store Request received: StudyInstanceUID=1.2.3.4...
+### Verify Upload in Server Logs
+
+```bash
+# On AWS server, check CTP (Clinical Trial Processor) logs
+kubectl logs -n services -l app=ctp --tail=50 | grep -i "received\|processed"
+
+# Check dcm4chee logs for stored studies
+kubectl logs -n services -l app=dcm4chee --tail=50 | grep -i "store"
+
+# Should show entries like:
+# DICOM Store Request received: StudyInstanceUID=1.2.3.4...
 # Store completed successfully
+```
+
+### Wait for Processing
+
+**Important:** After upload, Kaapana automatically processes the data:
+
+```bash
+# Wait 2-3 minutes for ingestion pipeline to complete:
+# - Metadata extraction (to OpenSearch)
+# - Thumbnail generation (to MinIO)
+# - Validation (DICOM compliance check)
+
+echo "Waiting for data processing (120 seconds)..."
+sleep 120
+
+# Check if metadata indexed
+curl -k -u admin:admin \
+  "https://kaapana.novairis.site/opensearch-api/meta-index/_search?q=PatientID:POC*&pretty" \
+  | grep -A2 "PatientID"
 ```
 
 ---
 
-## Step 4: Verify Data in OHIF Viewer
+## Step 4: View Data in Datasets Gallery (Primary Method)
+
+### Understanding the Datasets View
+
+The **Datasets Gallery View** is Kaapana's modern interface for data interaction, inspired by photo gallery apps. This is the primary way users interact with DICOM data.
+
+**Official Documentation:** https://kaapana.readthedocs.io/en/latest/user_guide/workflow_management_system/datasets.html
+
+### Access Datasets Gallery
+
+**Open browser:**
+```
+https://kaapana.novairis.site/
+```
+
+**Steps:**
+1. **Login** with kaapana / kaapana
+2. **Select Project** from dropdown (top-right): Choose `admin`
+3. **Navigate to** Workflows → Datasets
+
+### Explore the Gallery View
+
+**You should see:**
+- **Thumbnails** of each DICOM series
+- **Metadata cards** showing:
+  - Patient Name
+  - Patient ID
+  - Study Date
+  - Modality
+  - Series Description
+  - Number of instances
+- **Validation indicators** (warning/error icons if issues detected)
+
+### Test Gallery Features
+
+#### 1. Search and Filter
+
+**Full-text search:**
+```
+Search: POC001
+Result: Shows all series for patient POC001
+```
+
+**Wildcard search:**
+```
+Search: POC*
+Result: Shows all series with PatientID starting with POC
+```
+
+**Add filters:**
+- Click "Add Filter" button
+- Select "Modality" → Choose "CT"
+- Only CT series displayed
+
+**Official Search Syntax:**
+- Use `*` for wildcarding: `LUNG1-*`
+- Use `-` for excluding: `-CHEST`
+- Full OpenSearch query syntax supported
+
+#### 2. Multi-Select
+
+**Select multiple series:**
+- Hold **Ctrl** (Cmd on Mac) and click series
+- Or **click and drag** to select multiple
+
+**Available actions after selection:**
+- Create new dataset
+- Add to existing dataset
+- Remove from dataset (if dataset selected)
+- Execute workflow
+
+#### 3. Create a Dataset
+
+**Datasets organize series for workflow processing:**
+
+1. **Select series** (e.g., all CT series)
+2. **Click "Create Dataset"** button
+3. **Enter dataset name:** `poc-ct-dataset`
+4. **Click "Save"**
+
+**Result:** Dataset created and selected, gallery filters to show only those series
+
+#### 4. Open Detail View
+
+**View series details and images:**
+1. **Double-click a series thumbnail**
+2. **Side panel opens** showing:
+   - **OHIF Viewer** - Interactive medical image viewer
+   - **Metadata Table** - Searchable DICOM tags
+
+**OHIF Viewer controls:**
+- Scroll through slices
+- Adjust window/level
+- Zoom and pan
+- Measurements
+
+#### 5. Use Metadata Dashboard
+
+**If configured (check Settings):**
+- **Right panel** shows metadata distribution
+- **Bar charts** for Modality, Study Date, etc.
+- **Click bar** to filter by that value
+
+### Datasets View Checklist
+
+- [ ] Datasets gallery accessible
+- [ ] Uploaded series visible with thumbnails
+- [ ] Can search and find series by Patient ID
+- [ ] Filters work (Modality, Date, etc.)
+- [ ] Multi-select works
+- [ ] Can create dataset from selected series
+- [ ] Detail view opens and shows OHIF viewer
+- [ ] Can navigate through DICOM slices
+- [ ] Metadata table shows DICOM tags
+- [ ] Validation results visible (if any warnings/errors)
+
+---
+
+## Step 5: Verify Data in OHIF Viewer (Alternative Access)
 
 ### Access OHIF Viewer
 
@@ -468,28 +694,55 @@ http://YOUR_ELASTIC_IP/minio-console/
 
 Verify the following:
 
-### DICOM Upload
-- [x] Successfully uploaded DICOM files via UI
-- [x] Successfully sent DICOM files via dcmsend
-- [x] No upload errors in logs
+### Data Ingestion Pipeline
+- [ ] DICOM port 11112 accessible
+- [ ] CTP (Clinical Trial Processor) service running
+- [ ] Service DAGs active in Airflow
 
-### DICOM Storage
-- [x] Studies visible in dcm4chee admin UI
-- [x] Series and instance counts correct
-- [x] DICOM files stored in MinIO
+### DICOM Upload
+- [ ] Successfully uploaded DICOM files via DIMSE (dcmsend)
+- [ ] Correctly specified project and dataset names
+- [ ] No upload errors in dcmsend output
+- [ ] (Optional) Successfully uploaded DICOM files via web UI
+- [ ] Upload logs show successful reception
+
+### Automatic Processing
+- [ ] Metadata extracted to OpenSearch (meta-index)
+- [ ] Thumbnails generated and stored in MinIO
+- [ ] Series-project mappings created
+- [ ] Validation completed (check for warnings/errors)
+- [ ] Processing completed within 3-5 minutes
+
+### Datasets Gallery View (Primary Verification)
+- [ ] Series visible in Workflows → Datasets
+- [ ] Thumbnails displayed correctly
+- [ ] Metadata cards show patient/study/series info
+- [ ] Can search by Patient ID
+- [ ] Filters work (Modality, Date, etc.)
+- [ ] Multi-select functionality works
+- [ ] Can create dataset from selected series
+- [ ] Detail view opens with OHIF viewer
+- [ ] Validation indicators visible (if any issues)
 
 ### DICOM Viewing
-- [x] Studies appear in OHIF study list
-- [x] Can open and view studies in OHIF
-- [x] Image rendering correct
-- [x] Can navigate through slices
-- [x] Window/level adjustments work
-- [x] Measurement tools functional
+- [ ] Can view images in Datasets detail view (OHIF)
+- [ ] Can view images via Store → OHIF menu
+- [ ] Image rendering correct
+- [ ] Can navigate through slices
+- [ ] Window/level adjustments work
+- [ ] Measurement tools functional
 
-### Metadata Indexing
-- [x] DICOM metadata indexed in OpenSearch
-- [x] Can search and filter studies
-- [x] All metadata fields populated correctly
+### Backend Storage Verification
+- [ ] Studies visible in dcm4chee admin UI
+- [ ] Series and instance counts correct
+- [ ] Metadata indexed in OpenSearch (meta-index)
+- [ ] Can query metadata via OpenSearch Dashboards
+- [ ] Thumbnails stored in MinIO buckets
+
+### Project Isolation
+- [ ] Data visible only in correct project
+- [ ] Data also visible in admin project (default)
+- [ ] Project switching updates Datasets view correctly
 
 ---
 

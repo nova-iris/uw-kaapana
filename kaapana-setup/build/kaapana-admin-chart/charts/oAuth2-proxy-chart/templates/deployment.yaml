@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oauth2-proxy
+  namespace: "{{ .Values.global.helm_namespace }}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oauth2-proxy
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oauth2-proxy
+    spec:
+      initContainers:
+      - name: init
+        image: "{{ .Values.global.registry_url }}/service-checker:{{ .Values.global.kaapana_build_version }}"
+        imagePullPolicy: {{ .Values.global.pull_policy_images }}
+        env:
+          - name: WAIT
+            value: "keycloak,keycloak-internal-service.{{ .Values.global.admin_namespace }}.svc,443"
+          - name: DELAY
+            value: "3"
+          - name: TIMEOUT
+            value: "10"
+      containers:
+        - name: oauth2-proxy-container
+          image: "{{ .Values.global.registry_url }}/oauth2-proxy:{{ .Values.global.kaapana_build_version }}"
+          imagePullPolicy: {{ .Values.global.pull_policy_images }}
+          args:
+          - --config=/etc/oauth2-proxy/oauth2-proxy.cfg
+          ports:
+          - name: metrics
+            containerPort: 8081
+          - name: https
+            containerPort: 8443
+          resources:
+            requests:
+              memory: 50Mi
+            limits:
+              memory: 150Mi
+          volumeMounts:
+            - name: ssl-config
+              mountPath: /ssl
+            - name: config-volume
+              mountPath: /etc/oauth2-proxy
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+      volumes:
+      - name: ssl-config
+        secret:
+          secretName: certificate
+      - name: config-volume
+        configMap:
+          name: oauth2-proxy-cfg
+      priorityClassName: kaapana-high-priority
+      imagePullSecrets:
+      - name: registry-secret

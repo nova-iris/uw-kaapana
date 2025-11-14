@@ -97,7 +97,7 @@ variable "allowed_principal_arns" {
 variable "enable_secondary_instance" {
   description = "Enable creation of secondary EC2 instance"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "secondary_root_volume_size" {

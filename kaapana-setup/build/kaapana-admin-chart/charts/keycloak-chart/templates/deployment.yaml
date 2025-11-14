@@ -1,0 +1,93 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak
+  namespace: "{{  .Values.global.admin_namespace  }}"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: keycloak
+      app.kubernetes.io/component: keycloak
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: keycloak
+        app.kubernetes.io/component: keycloak
+    spec:
+      initContainers:
+      - name: init
+        image: "{{ .Values.global.registry_url }}/service-checker:{{ .Values.global.kaapana_build_version  }}"
+        imagePullPolicy:  {{ .Values.global.pull_policy_images }}
+        env:
+          - name: WAIT
+            value: "{{ .Values.kaapana_database.appName | default .Chart.Name }}-database-,{{ .Values.kaapana_database.appName | default .Chart.Name }}-database-service.{{  .Values.global.admin_namespace  }}.svc,5432"
+          - name: DELAY
+            value: "2"
+          - name: TIMEOUT
+            value: "10"
+      containers: 
+        - name: keycloak-container
+          image: "{{ .Values.global.registry_url }}/keycloak:{{ .Values.global.kaapana_build_version  }}"
+          imagePullPolicy:  {{ .Values.global.pull_policy_images }}
+          env:
+          - name: KC_BOOTSTRAP_ADMIN_USERNAME 
+            value: {{ .Values.global.credentials_keycloak_admin_username }}
+          - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+            value: {{ .Values.global.credentials_keycloak_admin_password }}
+          - name: KC_DB 
+            value: "postgres"
+          - name: KC_DB_URL 
+            value: "jdbc:postgresql://{{ .Values.kaapana_database.appName | default .Chart.Name }}-database-service.{{  .Values.global.admin_namespace  }}.svc/keycloak" 
+          - name: KC_DB_USERNAME 
+            value: {{ .Values.kaapana_database.postgres_user }}
+          - name: KC_DB_PASSWORD
+            value: {{ .Values.kaapana_database.postgres_password }}
+          - name: KC_LOG_LEVEL
+            value: "DEBUG"
+          - name: KC_HTTPS_CERTIFICATE_KEY_FILE
+            value: "/etc/x509/https/tls.key"
+          - name: KC_HTTPS_CERTIFICATE_FILE
+            value: "/etc/x509/https/tls.crt"
+          - name: KC_HTTP_MAX_QUEUED_REQUESTS
+            value: "100"
+          - name: JAVA_OPTS
+            value: "-Xmx400m"
+          ports:
+          - name: http
+            containerPort: 8080
+          - name: https
+            containerPort: 8443
+          - name: admin
+            containerPort: 9990
+          resources:
+            requests:
+              memory: 600Mi
+            limits:
+              memory: 700Mi
+          volumeMounts:        
+            - name: ssl-config-files
+              mountPath: /etc/x509/https
+              readOnly: true
+          command: 
+          - "/opt/keycloak/bin/kc.sh"
+          - "--verbose"
+          - "start"
+          - "--optimized"
+          - "--hostname"
+          - "https://{{ .Values.global.hostname}}:{{ .Values.global.https_port }}/auth"
+          - "--proxy-headers"
+          - "xforwarded"
+          - "--http-enabled"
+          - "true"
+          securityContext:
+            allowPrivilegeEscalation: false
+      volumes:
+      - name: ssl-config-files
+        secret:
+          secretName: certificate
+      priorityClassName: kaapana-high-priority
+      imagePullSecrets:
+      - name: registry-secret
+---

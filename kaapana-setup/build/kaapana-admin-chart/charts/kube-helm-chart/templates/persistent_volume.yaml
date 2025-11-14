@@ -1,0 +1,7 @@
+{{ include "dynamicPersistentVolumes" $ }}
+# dev-files
+{{- if .Values.global.dev_files }}
+---
+{{ include "devPersistentVolumes" $ }}
+{{- end }}
+# logs

@@ -2,18 +2,43 @@
 
 **Phase:** 4 - Test & Verify  
 **Duration:** 60-90 minutes  
-**Prerequisite:** 07-data-upload-testing.md completed
+**Prerequisite:** 07-data-upload-testing.md completed  
+**Related Milestone:** Milestone 3 - Core Modules Configuration
 
 ---
 
 ## Overview
 
-This guide tests Kaapana's workflow orchestration and AI processing capabilities:
-- Accessing and using Airflow
-- Running DICOM processing workflows
-- Testing nnU-Net segmentation (if available)
-- Verifying workflow outputs
-- Monitoring execution logs
+This guide tests Kaapana's workflow orchestration system, following the official [Workflows documentation](https://kaapana.readthedocs.io/en/latest/user_guide/workflows.html):
+
+### Kaapana Workflow Management System (WMS)
+
+Starting from version 0.2.0, Kaapana includes a comprehensive Workflow Management System that binds together:
+- **Workflows** - Semantic container for multiple jobs and their data
+- **Jobs** - Individual processing tasks executed by Airflow DAGs
+- **Datasets** - Collections of DICOM series for processing
+- **Projects** - Data isolation boundary for workflows
+
+**Key Components:**
+- **Workflow Execution** - Configure and launch workflows on data
+- **Workflow List** - Monitor running and completed workflows
+- **Instance Overview** - Manage local and remote instances (for federated execution)
+- **Airflow** - Underlying orchestration engine (DAG-based)
+
+### What You'll Test
+
+- **Workflow Execution via Datasets** - Launching workflows from selected data
+- **Workflow Configuration** - Setting parameters and options
+- **Workflow Monitoring** - Tracking execution status and logs
+- **Output Verification** - Checking results in MinIO and metadata
+- **Airflow DAG Management** - Understanding the underlying engine
+- **Service Workflows** - Automatic background processing
+
+**Official Documentation:**
+- Workflows Overview: https://kaapana.readthedocs.io/en/latest/user_guide/workflows.html
+- Workflow Execution: https://kaapana.readthedocs.io/en/latest/user_guide/workflow_management_system/workflow_execution.html
+- Workflow List: https://kaapana.readthedocs.io/en/latest/user_guide/workflow_management_system/workflow_list.html
+- Airflow System: https://kaapana.readthedocs.io/en/latest/user_guide/system/airflow.html
 
 ---
 
@@ -21,26 +46,152 @@ This guide tests Kaapana's workflow orchestration and AI processing capabilities
 
 ```bash
 # SSH to AWS server
-ssh -i kaapana-poc-key.pem ubuntu@$ELASTIC_IP
+ssh -i kaapana-poc-key.pem ubuntu@52.23.80.12
 
 # Verify Airflow running
-kubectl get pods -n kaapana | grep airflow
+kubectl get pods -n services | grep airflow
 
 # Verify DICOM data exists
-curl -s -u admin:admin http://localhost:9200/dicom-*/_count | grep count
+curl -k -s -u admin:admin https://kaapana.novairis.site/opensearch-api/meta-index/_count | grep count
 
 # Should show count > 0
 ```
 
 ---
 
-## Step 1: Access Airflow UI
+## Step 1: Execute Workflow from Datasets (Primary Method)
 
-### Open Airflow Web Interface
+### Understanding Workflow Execution
+
+**The Workflow Execution component is the ONLY place to start executable workflow instances.** You can access it two ways:
+1. Workflows → Workflow Execution (direct)
+2. Workflows → Datasets → Select series → Execute Workflow (recommended)
+
+**Workflow Configuration Steps:**
+1. Select runner instance(s) - where jobs execute
+2. Select Airflow DAG - the workflow to run
+3. Select dataset - the data to process
+
+ **Important:** All resources (workflows, datasets, series) are separated by **projects**. The WMS only shows items associated with the currently selected project.
+
+### Execute Your First Workflow
+
+#### Step 1.1: Select Data in Datasets
 
 **Open browser:**
 ```
-http://YOUR_ELASTIC_IP/flow/
+https://kaapana.novairis.site/
+```
+
+**Navigate to Workflows → Datasets**
+
+**Select series for processing:**
+1. Ensure correct project selected (top-right): `admin` or your test project
+2. Search for your uploaded data: `POC*`
+3. **Select series** - Click thumbnails (hold Ctrl/Cmd for multiple)
+4. Should see "X Items Selected" indicator
+
+#### Step 1.2: Launch Workflow Execution
+
+**Click "Execute Workflow" button**
+
+**Workflow Execution panel opens showing:**
+- **Runner Instances** section
+- **Workflow Selection** section
+- **Dataset** section
+- **Configuration Parameters** section
+
+#### Step 1.3: Configure Workflow
+
+**1. Select Runner Instance:**
+- Choose **"Local" instance** (your current Kaapana instance)
+- For federated execution, you'd select remote instances here
+
+**2. Select Workflow (DAG):**
+- Browse available workflows or search
+- Choose a simple workflow first: `dicom-to-nifti` or similar data processing DAG
+- Read workflow description
+
+**3. Dataset (Pre-filled):**
+- Should show "Temporary Dataset" with your selected series
+- Or optionally create a named dataset first
+
+**4. Configure Parameters:**
+- Each workflow has specific parameters
+- Common parameters:
+  - `batch_size` - Number of series processed in parallel
+  - `output_format` - Result format (DICOM, NIfTI, JSON)
+  - Workflow-specific options
+- Use defaults for first test
+
+#### Step 1.4: Execute
+
+**Click "Run Workflow" or "Execute" button**
+
+**Expected behavior:**
+- Confirmation message appears
+- Redirected to Workflow List automatically
+- Workflow appears with "Running" status
+
+---
+
+## Step 2: Monitor Workflow Execution
+
+### Access Workflow List
+
+**Navigate to: Workflows → Workflow List**
+
+**You should see:**
+- Your running workflow at the top
+- Status indicator (Running, Success, Failed)
+- Start time and duration
+- Dataset information
+- Action buttons (View, Abort, etc.)
+
+### View Workflow Details
+
+**Click on your workflow entry**
+
+**Workflow Detail View shows:**
+- **Workflow Graph** - Visual representation of tasks
+- **Task Status** - Each task's state (Running, Success, Failed)
+- **Execution Timeline**
+- **Logs** - Task-level logs
+- **Results** - Output locations
+
+### Monitor Progress
+
+**Watch execution:**
+- Tasks turn green when completed successfully
+- Tasks turn red if failed
+- Logs update in real-time
+- Duration counter shows elapsed time
+
+**Typical execution time:**
+- Simple workflows: 2-5 minutes
+- Complex workflows: 10-30+ minutes depending on data size
+
+---
+
+## Step 4: Understanding Airflow (Underlying Engine)
+
+### What is Airflow's Role?
+
+**Apache Airflow** is the underlying workflow orchestration engine. While users primarily interact with Kaapana's Workflow Execution interface, administrators and developers work with Airflow directly.
+
+**Airflow concepts:**
+- **DAG** (Directed Acyclic Graph) - Workflow definition
+- **Task** - Individual step in a workflow
+- **Operator** - Python class that performs a task (e.g., `DcmConverterOperator`)
+- **DAG Run** - Execution instance of a DAG
+- **Scheduler** - Manages DAG execution
+- **Worker** - Executes tasks
+
+### Access Airflow Admin UI
+
+**Open browser:**
+```
+https://kaapana.novairis.site/flow/
 ```
 
 **Login:**
@@ -48,13 +199,16 @@ http://YOUR_ELASTIC_IP/flow/
 - Password: `kaapana`
 
 **You should see:**
-- Airflow dashboard with DAG list
+- Airflow dashboard with complete DAG list
 - Toggle switches for enabling/disabling DAGs
-- Links to browse, graph, tree, logs, etc.
+- Links to browse, graph, tree, logs, code
+- Recent DAG runs and their status
+
+ **Note:** Most DAGs should remain "Off" (paused). **Service DAGs** (prefix `service-`) should be "On" for automatic processing.
 
 ---
 
-## Step 2: Explore Available DAGs
+## Step 5: Explore Available DAGs
 
 ### Understanding Kaapana DAGs
 

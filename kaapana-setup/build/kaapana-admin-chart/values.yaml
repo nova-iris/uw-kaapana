@@ -1,0 +1,22 @@
+global:
+  build_timestamp: '2025-11-14T03:15:10+00:00'
+  default_admin_limits_mem: 50Mi
+  default_admin_requests_mem: 50Mi
+  http_proxy: http://squid-proxy-service.admin.svc.cluster.local:3128
+  https_proxy: http://squid-proxy-service.admin.svc.cluster.local:3128
+  internalCidrs:
+  - 10.152.183.0/24
+  - 10.1.0.0/16
+  kaapana_build_version: 0.5.2
+  kaapana_collections:
+  - name: kaapana-extension-collection
+    version: 0.5.2
+  platform_build_branch: master
+  platform_last_commit_timestamp: '2025-10-20T09:30:50+00:00'
+  preinstall_extensions:
+  - name: kaapana-platform-chart
+    version: 0.5.2
+  - name: code-server-chart
+    version: 0.5.2
+migration-chart:
+  enabled: false

@@ -1,7 +1,7 @@
 # 04 - Artifact Transfer to AWS Deployment Server
 
-**Phase:** 2 - Build  
-**Duration:** 30-60 minutes (depends on network speed)  
+**Phase:** 2 - Build
+**Duration:** 5-10 minutes
 **Prerequisite:** 03-kaapana-build-process.md completed on separate build machine
 
 ---
@@ -12,11 +12,13 @@
 
 If you built on your AWS deployment server, skip to [05-server-installation.md](05-server-installation.md).
 
+**IMPORTANT:** This guide assumes you're using GitLab registry (or any external container registry). **Docker images are NOT transferred** since they're already pushed to the registry during build. Only deployment scripts and Helm charts need to be transferred.
+
 This guide covers transferring:
-- Docker images (~30-40GB compressed)
-- Helm charts (~500MB-1GB)
-- Deployment scripts
+- `deploy_platform.sh` script (~50KB)
+- Helm chart package (~50-100MB)
 - Configuration files
+- Build metadata
 
 ---
 
@@ -26,9 +28,9 @@ Choose based on your network and setup:
 
 | Method | Speed | Complexity | Best For |
 |--------|-------|------------|----------|
-| **SCP** | Fast on LAN | Low | Direct network access |
+| **SCP** | Fast | Low | Direct network access |
 | **AWS S3** | Medium | Medium | Cloud-based transfer |
-| **External Drive** | N/A | Low | No network, physical access |
+| **Git/GitLab** | Fast | Low | Version control integration |
 
 ---
 
@@ -38,40 +40,25 @@ Choose based on your network and setup:
 - SSH access from build machine to AWS server
 - AWS server Elastic IP address
 - SSH key for AWS server
+- Docker images already pushed to GitLab registry
 
 ### On Build Machine
 
-#### Step 1: Create Transfer Archives
+#### Step 1: Locate Build Artifacts
 ```bash
-cd ~/kaapana-build/kaapana
+cd ~/kaapana
 
-# Export Docker images
-echo "Exporting Docker images (this takes time)..."
-docker save $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "local-only") \
-  -o ~/kaapana-images.tar
+# Verify build artifacts exist
+ls -la build/kaapana-admin-chart/
 
-# Compress images (saves transfer time)
-echo "Compressing images (this takes time)..."
-gzip ~/kaapana-images.tar
-
-# Archive Helm charts and scripts
-echo "Archiving Helm charts and scripts..."
-tar -czf ~/kaapana-charts.tar.gz \
-  build-scripts/builds/ \
-  server-installation/ \
-  platforms/
-
-# Check archive sizes
-ls -lh ~ | grep kaapana
+# Should show:
+# - deploy_platform.sh (main deployment script)
+# - kaapana-admin-chart/ (Helm chart directory)
+# - kaapana-extension-collection/ (extensions)
+# - tree-kaapana-admin-chart.txt (build manifest)
 ```
 
-**Expected output:**
-```
--rw-rw-r-- 1 ubuntu ubuntu 35G  kaapana-images.tar.gz
--rw-rw-r-- 1 ubuntu ubuntu 800M kaapana-charts.tar.gz
-```
-
-#### Step 2: Transfer to AWS Server
+#### Step 2: Transfer Deployment Artifacts
 
 **Set variables:**
 ```bash
@@ -80,103 +67,130 @@ export AWS_IP="YOUR_ELASTIC_IP"
 export KEY_FILE="path/to/kaapana-poc-key.pem"
 ```
 
-**Transfer images:**
+**Transfer deployment directory:**
 ```bash
-# Transfer Docker images (large file, takes time)
+# Create deployment directory on AWS server
+ssh -i $KEY_FILE ubuntu@$AWS_IP "mkdir -p ~/kaapana"
+
+# Transfer entire kaapana-admin-chart build output
 scp -i $KEY_FILE \
   -o StrictHostKeyChecking=no \
-  -o ServerAliveInterval=60 \
-  ~/kaapana-images.tar.gz \
-  ubuntu@$AWS_IP:~/
+  -r ~/kaapana/build/kaapana-admin-chart/ \
+  ubuntu@$AWS_IP:~/kaapana/
 
-# Show transfer progress (run in another terminal)
-# watch -n 5 'ls -lh ~/kaapana-images.tar.gz'
-```
-
-**Transfer charts:**
-```bash
-# Transfer Helm charts and scripts
-scp -i $KEY_FILE \
-  ~/kaapana-charts.tar.gz \
-  ubuntu@$AWS_IP:~/
+# Transfer should complete in <5 minutes (no large Docker images)
 ```
 
 **Verify transfer:**
 ```bash
 # Check files on AWS server
-ssh -i $KEY_FILE ubuntu@$AWS_IP "ls -lh ~/ | grep kaapana"
+ssh -i $KEY_FILE ubuntu@$AWS_IP "ls -la ~/kaapana/kaapana-admin-chart/"
 ```
 
 ### On AWS Server
 
-#### Step 3: Extract Archives
+#### Step 3: Verify Deployment Artifacts
 ```bash
 # SSH to AWS server
 ssh -i kaapana-poc-key.pem ubuntu@$ELASTIC_IP
 
-# Check disk space (need 100GB+ free)
-df -h /
+# Check deployment artifacts
+ls -la ~/kaapana/kaapana-admin-chart/
 
-# Create working directory
-mkdir -p ~/kaapana-deploy
-cd ~/kaapana-deploy
+# Should show:
+# - deploy_platform.sh (executable deployment script)
+# - kaapana-admin-chart/ (Helm chart package)
+# - tree-kaapana-admin-chart.txt (build manifest)
+# - kaapana-extension-collection/ (optional extensions)
 
-# Extract Helm charts and scripts
-echo "Extracting charts and scripts..."
-tar -xzf ~/kaapana-charts.tar.gz
+# Verify script is executable
+chmod +x ~/kaapana/kaapana-admin-chart/deploy_platform.sh
 
-# Load Docker images (takes time)
-echo "Loading Docker images (this takes time)..."
-gunzip -c ~/kaapana-images.tar.gz | docker load
-
-# Verify images loaded
-docker images | wc -l
-# Should show: 90+ images
+# Check Helm chart package
+ls -la ~/kaapana/kaapana-admin-chart/kaapana-admin-chart/*.tgz
 ```
 
-#### Step 4: Verify Transfer
+#### Step 4: Verify GitLab Registry Access
 ```bash
-# Verify Docker images
-docker images | grep "local-only" | head -20
+# Test GitLab registry connectivity (replace with your registry)
+docker pull registry.gitlab.com/yourusername/yourproject/base-python-cpu:latest
 
-# Verify Helm charts
-ls -la ~/kaapana-deploy/build-scripts/builds/*.tgz
-
-# Verify deployment scripts
-ls -la ~/kaapana-deploy/server-installation/server_installation.sh
-ls -la ~/kaapana-deploy/platforms/deploy_platform.sh
-
-# Check directory structure
-tree -L 2 ~/kaapana-deploy/
-```
-
-**Expected structure:**
-```
-~/kaapana-deploy/
-├── build-scripts/
-│   └── builds/           # Helm charts
-├── server-installation/
-│   ├── server_installation.sh
-│   └── ... (scripts)
-└── platforms/
-    ├── deploy_platform.sh
-    ├── kaapana-platform-chart/
-    └── kaapana-admin-chart/
-```
-
-#### Step 5: Cleanup (Optional)
-```bash
-# Remove compressed archives to free space
-rm ~/kaapana-images.tar.gz
-rm ~/kaapana-charts.tar.gz
-
-# Check disk space
-df -h /
+# If pull succeeds, registry access is working
+# If it fails, you may need to login:
+echo "YOUR_GITLAB_TOKEN" | docker login registry.gitlab.com --username YOUR_USERNAME --password-stdin
 ```
 
 ---
 
-## Method 2: AWS S3 Transfer
+## Method 2: Git/GitLab Transfer (Recommended)
+
+**Prerequisites:**
+- GitLab repository: https://gitlab.com/trongtruong2509/kaapana
+- Build artifacts committed to GitLab
+- AWS server with Git access
+- GitLab credentials (see gitlab-registry.md)
+
+### On Build Machine
+
+#### Step 1: Commit Build Artifacts to GitLab
+```bash
+# Navigate to your GitLab repository
+cd /path/to/gitlab/kaapana
+
+# Add deployment artifacts
+git add deploy_platform.sh
+git add kaapana-platform-chart-0.5.2.tgz
+git add kaapana-extension-collection/
+git add tree-kaapana-admin-chart.txt
+
+# Commit deployment artifacts
+git commit -m "Add Kaapana deployment artifacts
+- deploy_platform.sh script (configured for GitLab registry)
+- kaapana-platform-chart-0.5.2.tgz (main Helm chart)
+- Extension charts and workflows
+- Build manifest and configuration"
+
+# Push to GitLab
+git push origin main
+```
+
+### On AWS Server
+
+#### Step 2: Clone and Deploy from GitLab
+```bash
+# Clone GitLab repository
+cd ~
+git clone https://gitlab.com/trongtruong2509/kaapana.git
+
+# Navigate to deployment directory
+cd ~/kaapana
+
+# Verify deployment artifacts
+ls -la deploy_platform.sh
+ls -la kaapana-platform-chart-0.5.2.tgz
+ls -la kaapana-extension-collection/charts/*.tgz
+
+# The deploy_platform.sh is already configured with GitLab registry:
+# CONTAINER_REGISTRY_URL="registry.gitlab.com/trongtruong2509/kaapana"
+# CONTAINER_REGISTRY_USERNAME="trongtruong2509"
+# CONTAINER_REGISTRY_PASSWORD="glpat-..."
+
+# Make script executable and run deployment
+chmod +x deploy_platform.sh
+./deploy_platform.sh
+```
+
+**Advantages of GitLab Transfer:**
+✅ Version control for all deployment artifacts
+✅ Automatic backup and history
+✅ Easy collaboration and sharing
+✅ Built-in CI/CD capabilities
+✅ Secure credential management
+✅ No manual file transfers needed
+
+---
+
+## Method 3: AWS S3 Transfer
 
 **Prerequisites:**
 - AWS CLI installed on both machines
@@ -185,18 +199,18 @@ df -h /
 
 ### On Build Machine
 
-#### Step 1: Create Archives (same as Method 1)
+#### Step 1: Create Deployment Archive
 ```bash
-cd ~/kaapana-build/kaapana
+cd ~/kaapana
 
-docker save $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "local-only") \
-  -o ~/kaapana-images.tar
-gzip ~/kaapana-images.tar
+# Create deployment archive (excluding Docker images)
+tar -czf ~/kaapana-deployment.tar.gz \
+  build/kaapana-admin-chart/ \
+  --exclude='*.log' \
+  --exclude='build/*.json'
 
-tar -czf ~/kaapana-charts.tar.gz \
-  build-scripts/builds/ \
-  server-installation/ \
-  platforms/
+# Check archive size (should be <200MB)
+ls -lh ~/kaapana-deployment.tar.gz
 ```
 
 #### Step 2: Upload to S3
@@ -204,16 +218,8 @@ tar -czf ~/kaapana-charts.tar.gz \
 # Set S3 bucket name
 export S3_BUCKET="your-kaapana-transfer-bucket"
 
-# Create bucket (if not exists)
-aws s3 mb s3://$S3_BUCKET --region us-east-1
-
-# Upload images (parallel multipart for speed)
-aws s3 cp ~/kaapana-images.tar.gz s3://$S3_BUCKET/ \
-  --storage-class STANDARD \
-  --no-progress
-
-# Upload charts
-aws s3 cp ~/kaapana-charts.tar.gz s3://$S3_BUCKET/
+# Upload deployment archive
+aws s3 cp ~/kaapana-deployment.tar.gz s3://$S3_BUCKET/
 
 # Verify upload
 aws s3 ls s3://$S3_BUCKET/
@@ -221,107 +227,20 @@ aws s3 ls s3://$S3_BUCKET/
 
 ### On AWS Server
 
-#### Step 3: Download from S3
+#### Step 3: Download and Extract
 ```bash
 # Set S3 bucket name
 export S3_BUCKET="your-kaapana-transfer-bucket"
 
-# Download images
-aws s3 cp s3://$S3_BUCKET/kaapana-images.tar.gz ~/
+# Download deployment archive
+aws s3 cp s3://$S3_BUCKET/kaapana-deployment.tar.gz ~/
 
-# Download charts
-aws s3 cp s3://$S3_BUCKET/kaapana-charts.tar.gz ~/
+# Extract deployment artifacts
+cd ~
+tar -xzf ~/kaapana-deployment.tar.gz
 
-# Verify downloads
-ls -lh ~/ | grep kaapana
-```
-
-#### Step 4: Extract (same as Method 1 Step 3)
-```bash
-mkdir -p ~/kaapana-deploy
-cd ~/kaapana-deploy
-tar -xzf ~/kaapana-charts.tar.gz
-gunzip -c ~/kaapana-images.tar.gz | docker load
-```
-
-#### Step 5: Cleanup S3 (Optional)
-```bash
-# Delete from S3 to avoid charges
-aws s3 rm s3://$S3_BUCKET/kaapana-images.tar.gz
-aws s3 rm s3://$S3_BUCKET/kaapana-charts.tar.gz
-
-# Delete bucket (if no longer needed)
-aws s3 rb s3://$S3_BUCKET
-```
-
----
-
-## Method 3: External Drive Transfer
-
-**Prerequisites:**
-- External USB drive with 50GB+ space
-- Physical access to both machines
-
-### On Build Machine
-
-#### Step 1: Mount External Drive
-```bash
-# List drives
-lsblk
-
-# Mount drive (adjust device name)
-sudo mkdir -p /mnt/usb
-sudo mount /dev/sdb1 /mnt/usb
-
-# Verify mount
-df -h | grep usb
-```
-
-#### Step 2: Copy Archives to Drive
-```bash
-# Create archives (same as Method 1)
-cd ~/kaapana-build/kaapana
-
-docker save $(docker images --format "{{.Repository}}:{{.Tag}}" | grep "local-only") \
-  -o ~/kaapana-images.tar
-gzip ~/kaapana-images.tar
-
-tar -czf ~/kaapana-charts.tar.gz \
-  build-scripts/builds/ \
-  server-installation/ \
-  platforms/
-
-# Copy to drive
-sudo cp ~/kaapana-images.tar.gz /mnt/usb/
-sudo cp ~/kaapana-charts.tar.gz /mnt/usb/
-
-# Verify copy
-ls -lh /mnt/usb/
-
-# Unmount drive
-sudo umount /mnt/usb
-```
-
-### On AWS Server
-
-#### Step 3: Mount and Copy from Drive
-```bash
-# Mount drive
-sudo mkdir -p /mnt/usb
-sudo mount /dev/sdb1 /mnt/usb
-
-# Copy from drive
-cp /mnt/usb/kaapana-images.tar.gz ~/
-cp /mnt/usb/kaapana-charts.tar.gz ~/
-
-# Unmount drive
-sudo umount /mnt/usb
-
-# Extract (same as Method 1 Step 3)
-mkdir -p ~/kaapana-deploy
-cd ~/kaapana-deploy
-tar -xzf ~/kaapana-charts.tar.gz
-gunzip -c ~/kaapana-images.tar.gz | docker load
+# Verify deployment artifacts
+ls -la kaapana/build/kaapana-admin-chart/deploy_platform.sh
 ```
 
 ---
@@ -337,43 +256,52 @@ cat > ~/verify-transfer.sh << 'EOF'
 echo "=== Kaapana Transfer Verification ==="
 echo ""
 
-# Docker images
-IMAGE_COUNT=$(docker images | grep "local-only" | wc -l)
-echo "Docker Images: $IMAGE_COUNT"
-if [ "$IMAGE_COUNT" -ge 90 ]; then
-  echo "  ✅ All images transferred"
-else
-  echo "  ❌ Missing images (expected 90+)"
-fi
-echo ""
-
-# Helm charts
-CHART_COUNT=$(find ~/kaapana-deploy/build-scripts/builds/ -name "*.tgz" 2>/dev/null | wc -l)
-echo "Helm Charts: $CHART_COUNT"
-if [ "$CHART_COUNT" -ge 2 ]; then
-  echo "  ✅ Charts transferred"
-else
-  echo "  ❌ Charts missing"
-fi
-echo ""
-
-# Deployment scripts
-if [ -f ~/kaapana-deploy/server-installation/server_installation.sh ]; then
-  echo "✅ server_installation.sh found"
-else
-  echo "❌ server_installation.sh missing"
-fi
-
-if [ -f ~/kaapana-deploy/platforms/deploy_platform.sh ]; then
+# Deployment script
+if [ -f ~/kaapana/kaapana-admin-chart/deploy_platform.sh ]; then
   echo "✅ deploy_platform.sh found"
+  if [ -x ~/kaapana/kaapana-admin-chart/deploy_platform.sh ]; then
+    echo "  ✅ Script is executable"
+  else
+    echo "  ❌ Script is not executable"
+  fi
 else
   echo "❌ deploy_platform.sh missing"
+fi
+echo ""
+
+# Helm chart package
+CHART_COUNT=$(find ~/kaapana/kaapana-admin-chart/kaapana-admin-chart/ -name "*.tgz" 2>/dev/null | wc -l)
+echo "Helm Chart Packages: $CHART_COUNT"
+if [ "$CHART_COUNT" -ge 1 ]; then
+  echo "  ✅ Helm chart packages found"
+  ls -la ~/kaapana/kaapana-admin-chart/kaapana-admin-chart/*.tgz
+else
+  echo "  ❌ Helm chart packages missing"
+fi
+echo ""
+
+# GitLab registry connectivity (if using GitLab)
+echo "Testing GitLab registry connectivity..."
+docker pull registry.gitlab.com/library/alpine:latest > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+  echo "  ✅ GitLab registry accessible"
+else
+  echo "  ❌ GitLab registry not accessible"
+  echo "  → Run: docker login registry.gitlab.com"
 fi
 echo ""
 
 # Disk space
 DISK_AVAIL=$(df -h / | tail -1 | awk '{print $4}')
 echo "Disk Space Available: $DISK_AVAIL"
+if [[ "$DISK_AVAIL" == *"G"* ]]; then
+  NUM_GB=$(echo $DISK_AVAIL | sed 's/G//')
+  if [ "$NUM_GB" -gt 20 ]; then
+    echo "  ✅ Sufficient disk space for deployment"
+  else
+    echo "  ⚠️  Low disk space (<20GB), consider expanding"
+  fi
+fi
 echo ""
 
 echo "=== Verification Complete ==="
@@ -387,16 +315,17 @@ chmod +x ~/verify-transfer.sh
 ```
 === Kaapana Transfer Verification ===
 
-Docker Images: 92
-  ✅ All images transferred
-
-Helm Charts: 4
-  ✅ Charts transferred
-
-✅ server_installation.sh found
 ✅ deploy_platform.sh found
+  ✅ Script is executable
 
-Disk Space Available: 150G
+Helm Chart Packages: 1
+  ✅ Helm chart packages found
+  -rw-r--r-- 1 ubuntu ubuntu 45M kaapana-admin-chart-0.5.2.tgz
+
+  ✅ GitLab registry accessible
+
+Disk Space Available: 78G
+  ✅ Sufficient disk space for deployment
 
 === Verification Complete ===
 ```
@@ -411,30 +340,38 @@ Disk Space Available: 150G
 ssh -i $KEY_FILE ubuntu@$AWS_IP "echo 'Connection OK'"
 
 # Try with verbose output
-scp -v -i $KEY_FILE ~/kaapana-images.tar.gz ubuntu@$AWS_IP:~/
+scp -v -i $KEY_FILE -r ~/kaapana/build/kaapana-admin-chart/ ubuntu@$AWS_IP:~/kaapana/
 
 # Check AWS security group allows SSH (port 22)
 # AWS Console → EC2 → Security Groups → Inbound Rules
 ```
 
-### Transfer interrupted
+### GitLab registry authentication fails
 ```bash
-# Resume using rsync instead of scp
-rsync -avz --progress --partial \
-  -e "ssh -i $KEY_FILE" \
-  ~/kaapana-images.tar.gz \
-  ubuntu@$AWS_IP:~/
+# Login to GitLab registry
+echo "YOUR_GITLAB_TOKEN" | docker login registry.gitlab.com --username YOUR_USERNAME --password-stdin
+
+# Verify login
+docker pull registry.gitlab.com/YOUR_USERNAME/YOUR_PROJECT/base-python-cpu:latest
 ```
 
-### Docker load fails
+### Helm chart not found
 ```bash
-# Check file integrity
-gunzip -t ~/kaapana-images.tar.gz
-# Should output: OK
+# Check if charts were generated during build
+ls -la ~/kaapana/build/kaapana-admin-chart/kaapana-admin-chart/
 
-# If corrupted, re-transfer
-# Try loading without decompression first:
-docker load -i ~/kaapana-images.tar.gz
+# If missing, rebuild charts only:
+cd ~/kaapana/build-scripts
+./start_build.py --config build-config.yaml --charts-only
+```
+
+### deploy_platform.sh not executable
+```bash
+# Make script executable
+chmod +x ~/kaapana/kaapana-admin-chart/deploy_platform.sh
+
+# Verify permissions
+ls -la ~/kaapana/kaapana-admin-chart/deploy_platform.sh
 ```
 
 ### Out of disk space on AWS server
@@ -456,14 +393,15 @@ df -h  # Verify
 
 Before proceeding to deployment, verify on AWS server:
 
-- [x] 90+ Docker images loaded (`docker images | wc -l`)
-- [x] Images tagged with `local-only/*`
-- [x] Helm charts in `~/kaapana-deploy/build-scripts/builds/`
-- [x] `server_installation.sh` exists
-- [x] `deploy_platform.sh` exists
-- [x] Directory structure matches expected layout
-- [x] At least 100GB disk space free
-- [x] Docker working without sudo
+- [x] `deploy_platform.sh` exists and is executable
+- [x] Helm chart package (`*.tgz`) exists in `kaapana-admin-chart/` directory
+- [x] GitLab registry accessible (or appropriate container registry)
+- [x] At least 20GB disk space free (for application data)
+- [x] SSH key access for remote management
+- [x] Docker installed and configured
+- [x] Kubernetes (MicroK8s) installed (from 05-server-installation.md)
+
+**IMPORTANT:** No Docker images need to be transferred when using external registry (GitLab). Images will be pulled during deployment.
 
 ---
 
@@ -476,30 +414,3 @@ Before proceeding to deployment, verify on AWS server:
 You'll install MicroK8s and prepare the Kubernetes environment for Kaapana deployment.
 
 ---
-
-## Quick Reference
-
-**Verify transfer:**
-```bash
-~/verify-transfer.sh
-```
-
-**Check images:**
-```bash
-docker images | grep "local-only" | wc -l
-```
-
-**Check charts:**
-```bash
-ls -la ~/kaapana-deploy/build-scripts/builds/
-```
-
-**Check disk space:**
-```bash
-df -h /
-```
-
----
-
-**Document Status:** ✅ Complete  
-**Next Document:** 05-server-installation.md

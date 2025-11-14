@@ -1,0 +1,5 @@
+---
+global:
+  dev_files: false
+
+admin: true
