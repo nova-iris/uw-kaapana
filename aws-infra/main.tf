@@ -1,38 +1,3 @@
-terraform {
-  required_version = ">= 1.5.0"
-}
-
-provider "aws" {
-  profile = "kaapana"
-  region  = var.aws_region
-}
-
-# Get AWS account info for tagging
-data "aws_caller_identity" "current" {}
-
-data "aws_region" "current" {}
-
-# Get Ubuntu 24.04 LTS AMI
-data "aws_ami" "ubuntu" {
-  most_recent = true
-  owners      = ["099720109477"] # Canonical
-
-  filter {
-    name   = "name"
-    values = ["ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*"]
-  }
-
-  filter {
-    name   = "virtualization-type"
-    values = ["hvm"]
-  }
-}
-
-# Get availability zones
-data "aws_availability_zones" "available" {
-  state = "available"
-}
-
 # Local values for common configuration
 locals {
   project_name = "kaapana-poc"
@@ -88,20 +53,20 @@ module "security" {
 # ==========================================
 # Storage Module
 # ==========================================
-module "storage" {
-  source = "./modules/storage"
+# module "storage" {
+#   source = "./modules/storage"
 
-  project_name           = local.project_name
-  environment            = local.environment
-  common_tags            = local.common_tags
-  data_volume_size       = var.data_volume_size
-  data_volume_type       = var.data_volume_type
-  data_volume_iops       = var.data_volume_iops
-  data_volume_throughput = var.data_volume_throughput
-  enable_ebs_encryption  = var.enable_ebs_encryption
-  availability_zones     = [data.aws_availability_zones.available.names[0]]
-  kms_key_id             = module.security.kms_key_arn
-}
+#   project_name           = local.project_name
+#   environment            = local.environment
+#   common_tags            = local.common_tags
+#   data_volume_size       = var.data_volume_size
+#   data_volume_type       = var.data_volume_type
+#   data_volume_iops       = var.data_volume_iops
+#   data_volume_throughput = var.data_volume_throughput
+#   enable_ebs_encryption  = var.enable_ebs_encryption
+#   availability_zones     = [data.aws_availability_zones.available.names[0]]
+#   kms_key_id             = module.security.kms_key_arn
+# }
 
 # ==========================================
 # SSH Key Pair
@@ -125,12 +90,12 @@ module "ec2" {
 
   name = "${local.project_name}-${local.environment}-instance"
 
-  ami                           = data.aws_ami.ubuntu.id
-  instance_type                 = var.instance_type
-  key_name                      = var.create_key_pair ? var.key_name : null
-  subnet_id                     = module.vpc.public_subnet_ids[0]
-  vpc_security_group_ids        = [module.security.kaapana_security_group_id]
-  iam_instance_profile          = module.security.instance_profile_name
+  ami                    = data.aws_ami.ubuntu.id
+  instance_type          = var.instance_type
+  key_name               = var.create_key_pair ? var.key_name : null
+  subnet_id              = module.vpc.public_subnet_ids[0]
+  vpc_security_group_ids = [module.security.kaapana_security_group_id]
+  iam_instance_profile   = module.security.instance_profile_name
 
   associate_public_ip_address = true
   user_data_replace_on_change = false
@@ -151,9 +116,6 @@ module "ec2" {
     Name = "${local.project_name}-${local.environment}-root-volume"
   })
 
-  
-  # Note: Data volume will be handled by the storage module and attached separately
-
   # User data for instance initialization
   user_data = file("${path.module}/user_data.sh")
 
@@ -163,35 +125,21 @@ module "ec2" {
 }
 
 # ==========================================
-# ECR Module
-# ==========================================
-module "ecr" {
-  count  = 1
-  source = "./modules/ecr"
-
-  project_name           = local.project_name
-  environment            = local.environment
-  allowed_principal_arns = var.allowed_principal_arns
-  ec2_role_arn           = module.security.iam_role_arn
-  common_tags            = local.common_tags
-}
-
-# ==========================================
 # Secondary EC2 Instance (Optional)
 # ==========================================
 module "ec2_secondary" {
-  count = var.enable_secondary_instance ? 1 : 0
-  source = "terraform-aws-modules/ec2-instance/aws"
+  count   = var.enable_secondary_instance ? 1 : 0
+  source  = "terraform-aws-modules/ec2-instance/aws"
   version = "~> 6.0"
 
   name = "${local.project_name}-${local.environment}-secondary-instance"
 
-  ami                           = data.aws_ami.ubuntu.id
-  instance_type                 = var.instance_type
-  key_name                      = var.create_key_pair ? var.key_name : null
-  subnet_id                     = module.vpc.public_subnet_ids[0]
-  vpc_security_group_ids        = [module.security.kaapana_security_group_id]
-  iam_instance_profile          = module.security.instance_profile_name
+  ami                    = "ami-01dfe3fe50212ff27" # data.aws_ami.ubuntu.id
+  instance_type          = var.instance_type
+  key_name               = var.create_key_pair ? var.key_name : null
+  subnet_id              = module.vpc.public_subnet_ids[0]
+  vpc_security_group_ids = [module.security.kaapana_security_group_id]
+  iam_instance_profile   = module.security.instance_profile_name
 
   associate_public_ip_address = true
   user_data_replace_on_change = false

@@ -29,7 +29,7 @@ This guide prepares your build machine to compile Kaapana from source. You can u
 
 ```bash
 # Check OS
-lsb_release -a
+cat /etc/*release
 # Must show: Ubuntu 22.04 or 24.04
 
 # Check architecture
@@ -78,9 +78,6 @@ python3 --version  # Should be 3.10+
 git --version
 curl --version
 ```
-
-**Note:** This follows the official Kaapana build requirements. Additional tools like `jq` and `screen` can be installed if needed for your workflow.
-
 ---
 
 ## Step 2: Install AWS CLI (Required for ECR)
@@ -132,22 +129,26 @@ aws sts get-caller-identity
 
 **Add Docker's official repository and install:**
 ```bash
-# Add Docker's official GPG key
-sudo apt-get update
-sudo apt-get install -y ca-certificates curl
+# Add Docker's official GPG key:
+sudo apt update
+sudo apt install ca-certificates curl
 sudo install -m 0755 -d /etc/apt/keyrings
 sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 sudo chmod a+r /etc/apt/keyrings/docker.asc
 
-# Add Docker repository
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" | \
-  sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+# Add the repository to Apt sources:
+sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+Types: deb
+URIs: https://download.docker.com/linux/ubuntu
+Suites: $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}")
+Components: stable
+Signed-By: /etc/apt/keyrings/docker.asc
+EOF
+
+sudo apt update
 
 # Install Docker Engine
-sudo apt-get update
-sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 
 # Verify Docker installation
 docker --version
@@ -173,19 +174,6 @@ docker run hello-world
 Hello from Docker!
 This message shows that your installation appears to be working correctly.
 ```
-
-**Verify Docker setup:**
-```bash
-# Check Docker info
-docker info | head -20
-
-# Check Docker images
-docker images
-
-# Check Docker data location
-ls -lh /var/lib/docker/
-```
-
 ---
 
 ## Step 4: Install Helm
@@ -193,7 +181,7 @@ ls -lh /var/lib/docker/
 **Add Helm's official repository and install:**
 ```bash
 # Install dependencies
-sudo apt-get install -y curl gpg apt-transport-https
+sudo apt install -y curl gpg apt-transport-https
 
 # Add Helm GPG key
 curl -fsSL https://packages.buildkite.com/helm-linux/helm-debian/gpgkey | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
@@ -203,8 +191,8 @@ echo "deb [signed-by=/usr/share/keyrings/helm.gpg] https://packages.buildkite.co
   sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
 
 # Install Helm
-sudo apt-get update
-sudo apt-get install -y helm
+sudo apt update
+sudo apt install -y helm
 
 # Verify Helm installation
 helm version
@@ -213,19 +201,12 @@ helm version
 **Install Helm kubeval plugin:**
 ```bash
 helm plugin install https://github.com/instrumenta/helm-kubeval
-```
 
-**Verify plugin installation:**
-```bash
+# Verify plugin installation:
 helm plugin list
+# Expected output:
+# kubeval 0.x.x   Validate Helm charts against Kubernetes schemas
 ```
-
-**Expected output:**
-```
-NAME    VERSION DESCRIPTION
-kubeval 0.x.x   Validate Helm charts against Kubernetes schemas
-```
-
 ---
 
 ## Step 5: Clone Kaapana Repository
@@ -313,140 +294,7 @@ cd ~/kaapana/build-scripts
 
 # Install Python requirements
 python3 -m pip install -r requirements.txt
-
-# Verify key packages installed
-pip list | grep -E "PyYAML|jinja2|click|docker"
 ```
-
-**Expected packages:**
-- PyYAML
-- Jinja2
-- click
-- docker
-- requests
-- (and others as specified in requirements.txt)
-
----
-
----
-
-## Step 8: Verify Build Environment
-
-**Run verification script:**
-
-```bash
-# Create verification script
-cat > ~/verify-build-env.sh << 'EOF'
-#!/bin/bash
-echo "=== Build Environment Verification ==="
-echo ""
-
-# OS Check
-echo "OS: $(lsb_release -d | cut -f2)"
-echo "Architecture: $(uname -m)"
-echo ""
-
-# Resources
-echo "CPU Cores: $(nproc)"
-echo "RAM: $(free -h | grep Mem | awk '{print $2}')"
-echo "Root Disk Space: $(df -h / | tail -1 | awk '{print $4}')"
-echo "Docker Disk Space: $(df -h /var/lib/docker | tail -1 | awk '{print $4}')"
-echo ""
-
-# Snap
-echo "Snap: $(snap version | head -1 2>/dev/null || echo 'NOT INSTALLED')"
-echo ""
-
-# Snap
-echo "Snap: $(snap version | head -1 2>/dev/null || echo 'NOT INSTALLED')"
-echo ""
-
-# Tools
-echo "Docker: $(docker --version 2>/dev/null || echo 'NOT INSTALLED')"
-echo "Helm: $(helm version --short 2>/dev/null || echo 'NOT INSTALLED')"
-echo "Git: $(git --version 2>/dev/null || echo 'NOT INSTALLED')"
-echo "Python: $(python3 --version 2>/dev/null || echo 'NOT INSTALLED')"
-echo ""
-
-# Docker Test
-echo "Docker Test:"
-if docker run --rm hello-world &>/dev/null; then
-  echo "  ✅ Docker working (no sudo required)"
-else
-  echo "  ❌ Docker not working"
-fi
-echo ""
-
-# Kaapana Repo
-if [ -d ~/kaapana ]; then
-  echo "✅ Kaapana repository cloned"
-  echo "   Location: ~/kaapana"
-else
-  echo "❌ Kaapana repository not found"
-fi
-echo ""
-
-# Python venv
-if [ -d ~/kaapana/.venv ]; then
-  echo "✅ Python virtual environment created"
-else
-  echo "❌ Python virtual environment not found"
-fi
-echo ""
-
-# Build requirements
-if source ~/kaapana/.venv/bin/activate && python3 -c "import docker, yaml, jinja2" 2>/dev/null; then
-  echo "✅ Python build requirements installed"
-  deactivate
-else
-  echo "❌ Python build requirements missing"
-fi
-
-echo ""
-echo "=== Verification Complete ==="
-EOF
-
-chmod +x ~/verify-build-env.sh
-~/verify-build-env.sh
-```
-
-**Expected output:**
-```
-=== Build Environment Verification ===
-
-OS: Ubuntu 24.04.x LTS
-Architecture: x86_64
-
-CPU Cores: 16
-RAM: 64Gi
-Root Disk Space: 180G
-Docker Disk Space: 180G
-
-Snap: snap    2.63
-snapd  2.63
-
-Docker: Docker version 27.x.x, build xxxxxxx
-Helm: v3.x.x
-Git: git version 2.43.x
-Python: Python 3.12.x
-
-Docker Test:
-  ✅ Docker working (no sudo required)
-
-✅ Kaapana repository cloned
-   Location: ~/kaapana
-
-✅ Python virtual environment created
-
-✅ Python build requirements installed
-
-=== Verification Complete ===
-```
-
-**⚠️ Important Notes:**
-- Ensure Docker Disk Space shows at least 200GB free at `/var/snap/docker/common/var-lib-docker/`
-- Complete build requires ~90GB (~110GB with cache) + ~80GB if creating offline tarball
-- If disk space is insufficient, follow the "Out of disk space" troubleshooting section
 
 ---
 
@@ -644,6 +492,6 @@ This guide is based on the official Kaapana documentation:
 
 ---
 
-**Document Status:** ✅ Complete  
+**Document Status:** Complete  
 **Last Updated:** Using official Docker and Helm repositories (no snap required)  
 **Next Document:** 03-kaapana-build-process.md

@@ -37,17 +37,6 @@ output "elastic_ip" {
   value       = module.elastic_ip.elastic_ip
 }
 
-# ECR Outputs
-output "ecr_repository_url" {
-  description = "URL of the ECR repository for Kaapana images"
-  value       = module.ecr[0].ecr_repository_url
-}
-
-output "ecr_repository_name" {
-  description = "Name of the ECR repository"
-  value       = module.ecr[0].ecr_repository_name
-}
-
 # Connection Information
 output "connection_info" {
   description = "Connection information for the primary instance"

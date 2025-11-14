@@ -25,7 +25,7 @@ variable "instance_type" {
 variable "root_volume_size" {
   description = "Size of the root volume in GB"
   type        = number
-  default     = 100
+  default     = 500
 }
 
 variable "data_volume_size" {
