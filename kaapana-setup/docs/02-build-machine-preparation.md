@@ -2,19 +2,13 @@
 
 **Phase:** 1 - Preparation  
 **Duration:** 30-60 minutes  
-**Prerequisite:** Ubuntu 22.04 or 24.04 LTS (x64)
 
 ---
 
 ## Overview
 
-This guide prepares your build machine to compile Kaapana from source. You can use:
-- **Option A:** Your AWS EC2 instance (build then deploy on same machine)
-- **Option B:** Separate Ubuntu build machine (build, then transfer to AWS)
+This guide prepares your build machine to compile Kaapana from source. You'll install and configure all necessary tools, including AWS CLI, Docker, Helm, and Python dependencies.
 
-**Recommended:** Use your AWS instance as the build machine for simplicity.
-
----
 
 ## Build Machine Requirements
 
@@ -57,7 +51,68 @@ df -h /
 
 ---
 
-## Step 1: System Update and Core Dependencies
+## Installation Methods
+
+You have two options for preparing the build machine:
+
+- **Automated Installation (Recommended):** Run the provided script that handles all installations automatically
+- **Manual Installation:** Follow the step-by-step instructions for each tool
+
+## Automated Installation (Recommended)
+
+Run the automated preparation script that installs and configures all required tools:
+
+```bash
+# ssh into your build machine 
+# And clone the setup repository
+git clone https://github.com/nova-iris/uw-kaapana.git ~/uw-kaapana
+
+# Navigate to the build scripts directory
+cd ~/uw-kaapana/kaapana-setup/build
+
+# Make the script executable (if needed)
+chmod +x build-preparation.sh
+
+# Run the automated preparation script
+./build-preparation.sh
+```
+
+**What the script does:**
+- Verifies system requirements (OS, CPU, RAM, disk space)
+- Updates system packages
+- Installs AWS CLI v2 and verifies credentials
+- Installs Docker from official repository
+- Configures Docker for non-root access
+- Installs Helm with kubeval plugin
+- Clones Kaapana repository
+- Creates Python virtual environment
+- Installs Python build requirements
+- Adds convenient aliases to ~/.bashrc
+
+**After the script completes:**
+```bash
+# Activate the virtual environment
+source ~/.bashrc  # Reload bashrc to add aliases
+activate-kaapana  # Use the alias created by the script
+
+# Verify everything is working
+python3 --version
+docker --version
+helm version
+```
+
+**Continue to:** [Next Steps](#next-steps)
+
+---
+
+## Manual Installation
+
+Follow the detailed step-by-step instructions below if you prefer manual setup or need to customize specific components.
+
+**Note:** The following manual instructions are provided for reference or for users who need to customize specific components. Most users should use the [Automated Installation](#automated-installation-recommended) option above.
+
+
+### Step 1: System Update and Core Dependencies
 
 ```bash
 # Update package lists
@@ -80,7 +135,7 @@ curl --version
 ```
 ---
 
-## Step 2: Install AWS CLI (Required for ECR)
+### Step 2: Install AWS CLI
 
 **Install AWS CLI v2:**
 ```bash
@@ -125,7 +180,7 @@ aws sts get-caller-identity
 
 ---
 
-## Step 3: Install Docker
+### Step 3: Install Docker
 
 **Add Docker's official repository and install:**
 ```bash
@@ -176,7 +231,7 @@ This message shows that your installation appears to be working correctly.
 ```
 ---
 
-## Step 4: Install Helm
+### Step 4: Install Helm
 
 **Add Helm's official repository and install:**
 ```bash
@@ -209,7 +264,7 @@ helm plugin list
 ```
 ---
 
-## Step 5: Clone Kaapana Repository
+### Step 5: Clone Kaapana Repository
 
 ```bash
 # Clone Kaapana repository (master branch)
@@ -237,7 +292,7 @@ kaapana/
 
 ---
 
-## Step 6: Setup Python Virtual Environment (Recommended)
+### Step 6: Setup Python Virtual Environment (Recommended)
 
 **Why use a virtual environment?**
 - Best practice for Python dependency management
@@ -280,7 +335,7 @@ activate-kaapana
 
 ---
 
-## Step 7: Install Python Build Requirements
+### Step 7: Install Python Build Requirements
 
 **Ensure virtual environment is activated:**
 ```bash
@@ -298,184 +353,42 @@ python3 -m pip install -r requirements.txt
 
 ---
 
-## Troubleshooting
-
-### Docker permission denied
-```bash
-# Add user to docker group again
-sudo usermod -aG docker $USER
-
-# Apply group membership immediately
-newgrp docker
-
-# Test again
-docker run hello-world
-
-# Or logout and login again for group changes to take effect
-exit
-# Then SSH back in
-```
-
-### Python virtual environment issues
-```bash
-# If venv creation fails, ensure python3-venv is installed
-sudo apt install -y python3-venv
-
-# Remove existing venv and recreate
-rm -rf ~/kaapana/.venv
-cd ~/kaapana
-python3 -m venv .venv
-
-# Activate and verify
-source ~/kaapana/.venv/bin/activate
-which python3
-```
-
-### Python packages not found
-```bash
-# Ensure venv is activated
-source ~/kaapana/.venv/bin/activate
-
-# Check prompt - should show (.venv)
-which python3
-
-# Upgrade pip first
-python3 -m pip install --upgrade pip
-
-# Reinstall requirements
-cd ~/kaapana/build-scripts
-python3 -m pip install -r requirements.txt
-
-# Verify installation
-pip list | grep -E "PyYAML|jinja2|docker"
-```
-
-### Out of disk space
-
-**⚠️ CRITICAL:** Kaapana build requires significant disk space. Plan accordingly BEFORE building.
-
-**Space Requirements:**
-- Build phase: ~90GB for 90+ container images
-- Build cache: ~20GB additional
-- Optional offline tarball: ~80GB additional
-- **Total required: 200GB+ free space (300GB+ recommended)**
-
-**Check current usage:**
-```bash
-# Check available space
-df -h /
-df -h /var/snap/docker/common/
-
-# Check Docker current usage
-du -sh /var/snap/docker/common/var-lib-docker/
-docker system df
-
-# Identify what's using space
-docker images --format "table {{.Repository}}\t{{.Size}}" | sort -k3 -h
-```
-
-**Option 1: Expand AWS Root Volume (Recommended for Single Volume Setup)**
-
-```bash
-# 1. AWS Console → EC2 → Volumes
-#    - Select root volume (e.g., /dev/nvme0n1)
-#    - Click "Modify Volume"
-#    - Increase size to 300GB or 500GB
-# 2. Wait 5-10 minutes for volume to expand
-# 3. On server:
-
-sudo growpart /dev/nvme0n1 1
-sudo resize2fs /dev/nvme0n1p1
-
-# Verify new size
-df -h /
-# Should now show 300GB+ available
-```
-
-**Option 2: Use Additional AWS Volume (if available)**
-
-```bash
-# Check for unmounted volumes
-sudo lsblk -f
-sudo file -s /dev/nvme1n1  # Check second disk
-
-# If additional disk exists and is uninitialized:
-sudo mkfs.ext4 /dev/nvme1n1
-sudo mkdir -p /mnt/docker-storage
-sudo mount /dev/nvme1n1 /mnt/docker-storage
-sudo chown ubuntu:ubuntu /mnt/docker-storage
-
-# Verify
-df -h /mnt/docker-storage
-
-# Add to fstab for persistent mounting after reboot
-echo '/dev/nvme1n1 /mnt/docker-storage ext4 defaults,nofail 0 2' | sudo tee -a /etc/fstab
-```
-
-**Option 3: Clean Before Build (Limited help on first build)**
-
-```bash
-# Remove unused Docker images and build cache
-docker system prune -af
-
-# Check space freed
-df -h /
-
-# This only helps if you have old builds from previous attempts
-```
-
-**If you run out of space DURING the build:**
-
-```bash
-# 1. Stop the build immediately
-# Press Ctrl+C (if in screen: Ctrl+A then K)
-
-# 2. Clean Docker build cache (safe to do while build is stopped)
-docker builder prune -af
-
-# 3. Check freed space
-df -h /
-
-# 4. Either expand volume (Option 1) or use additional volume (Option 2)
-
-# 5. Restart the build:
-cd ~/kaapana
-source ~/.venv/bin/activate
-cd build-scripts
-python3 start_build.py --config build-config.yaml --build-only --parallel 4
-```
-
----
-
-## Build Machine Ready Checklist
-
-Before proceeding to the build process, verify:
-
-- [ ] Ubuntu 22.04 or 24.04 LTS installed (x64 only)
-- [ ] At least 8 CPU cores (16+ recommended)
-- [ ] At least 64GB RAM (128GB recommended)
-- [ ] At least 200GB free disk space (for build + cache + optional offline tarball)
-- [ ] AWS CLI v2 installed and configured
-- [ ] AWS credentials working (IAM role or access keys)
-- [ ] Docker installed from official repository and working without sudo
-- [ ] Helm installed from official repository with kubeval plugin
-- [ ] Git and Python 3.10+ installed
-- [ ] Kaapana repository cloned to ~/kaapana
-- [ ] Python virtual environment created at ~/kaapana/.venv
-- [ ] Python build requirements installed in virtual environment
-- [ ] Verification script passed all checks
-- [ ] Internet connectivity working
-- [ ] ECR access configured (if using AWS ECR for container registry)
-
----
-
 ## Next Steps
 
 ✅ **Build machine is ready!**
 
-**Next:** [03-kaapana-build-process.md](03-kaapana-build-process.md)
+Now you have two options for deploying Kaapana:
 
-You'll configure the build settings and execute the Kaapana build process (~1 hour).
+### Option 1: Build from Source (Recommended for Customization)
+**Next:** [03-kaapana-build-process.md](03-kaapana-build-process.md)
+- Build Kaapana Docker images from source (~2 hours)
+- Full control over build configuration
+- Requires building 90+ containers locally
+- Script location: `~/kaapana/build/kaapana-admin-chart/deploy_platform.sh`
+
+### Option 2: Use Pre-built Images (Recommended for Quick Deployment)
+**Next:** [06-platform-deployment.md](06-platform-deployment.md)
+- Use pre-built Docker images from GitLab registry
+- Faster deployment (~30 minutes)
+- Requires GitLab registry credentials
+- Script location: `~/uw-kaapana/kaapana-setup/build/deploy_platform.sh`
+
+**Choose Option 1** if you need to customize Kaapana or want to build from source.
+**Choose Option 2** if you want quick deployment with standard configurations.
+
+### Required Credentials
+
+Both options require proper registry credentials:
+- **Option 1**: AWS ECR credentials (configured during build)
+- **Option 2**: GitLab registry credentials for pre-built images
+
+```bash
+# For GitLab registry access (Option 2)
+# You'll need to configure these in deployment:
+# Registry URL: registry.gitlab.com
+# Username: Your GitLab username
+# Password: GitLab access token with registry access
+```
 
 ---
 
@@ -491,7 +404,3 @@ This guide is based on the official Kaapana documentation:
 - **Kaapana GitHub Repository:** https://github.com/kaapana/kaapana
 
 ---
-
-**Document Status:** Complete  
-**Last Updated:** Using official Docker and Helm repositories (no snap required)  
-**Next Document:** 03-kaapana-build-process.md

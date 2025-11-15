@@ -73,7 +73,7 @@ chmod +x server_installation.sh
 # Run installation (requires sudo, takes 20-30 minutes)
 # IMPORTANT: The script will ask "Is this correct and you don't need a proxy?" - answer 'y'
 # Note: On AlmaLinux, use: sudo -E ./server_installation.sh
-echo 'y' | sudo ./server_installation.sh 2>&1 | tee install.log
+echo 'y' | sudo ./server_installation.sh
 
 # Reboot after completion
 sudo reboot

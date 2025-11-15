@@ -79,7 +79,7 @@ variable "create_key_pair" {
 variable "public_key_path" {
   description = "Path to the SSH public key file"
   type        = string
-  default     = "~/.ssh/id_ed25519.pub"
+  default     = "~/.ssh/kaapana-poc.pub"
 }
 
 variable "key_name" {

@@ -67,7 +67,7 @@ Thumbs.db
 *.p12
 *.pfx
 id_rsa*
-id_ed25519*
+kaapana-poc*
 
 # AWS specific
 .aws/
