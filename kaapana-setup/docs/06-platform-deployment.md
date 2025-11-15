@@ -47,6 +47,7 @@ The platform is deployed using the script `deploy_platform.sh`, which is created
 ls -la ~/kaapana/build/kaapana-admin-chart/deploy_platform.sh
 
 # Should show executable deployment script
+# Migration job did not complete within 180s
 ```
 
 ---

@@ -135,7 +135,7 @@ module "ec2_secondary" {
   name = "${local.project_name}-${local.environment}-secondary-instance"
 
   ami                    = "ami-01dfe3fe50212ff27" # data.aws_ami.ubuntu.id
-  instance_type          = var.instance_type
+  instance_type          = "r5.4xlarge"            # var.instance_type
   key_name               = var.create_key_pair ? var.key_name : null
   subnet_id              = module.vpc.public_subnet_ids[0]
   vpc_security_group_ids = [module.security.kaapana_security_group_id]

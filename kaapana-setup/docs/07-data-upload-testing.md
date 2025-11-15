@@ -36,28 +36,6 @@ When DICOM data arrives at Kaapana (via DIMSE or web upload), the following happ
 
 ---
 
-## Prerequisites Check
-
-```bash
-# SSH to AWS server
-ssh -i kaapana-poc-key.pem ubuntu@52.23.80.12
-
-# Verify all pods running
-kubectl get pods -A | grep -E "services|kaapana"
-
-# Verify Kaapana UI accessible
-curl -k -s -o /dev/null -w "%{http_code}" https://kaapana.novairis.site/
-# Should return: 200 or 302
-
-# Verify DICOM receiver port
-nc -zv kaapana.novairis.site 11112
-# Should show: succeeded
-
-# Ensure you're in admin project or have a project selected
-```
-
----
-
 ## Step 0: Understanding Projects and Datasets
 
 **Before uploading data, understand Kaapana's project-based data organization:**
@@ -100,52 +78,97 @@ After data upload, you'll view and interact with data in the **Datasets Gallery 
 
 ## Step 1: Obtain Sample DICOM Data
 
-### Option A: Download from TCIA (Recommended)
+### Option A: Use pydicom Sample Data (Recommended - Always Available)
 
-**The Cancer Imaging Archive provides public DICOM datasets.**
+**pydicom provides built-in sample DICOM files that are always accessible.**
 
 ```bash
-# On AWS server, create downloads directory
+# Install pydicom with sample data
+pip install pydicom
+
+# Create samples directory
 mkdir -p ~/dicom-samples
 cd ~/dicom-samples
 
-# Download small CT dataset from TCIA
-# Example: COVID-19 CT scans (small subset)
-wget https://wiki.cancerimagingarchive.net/download/attachments/70230072/CT-0.zip
+# Download sample DICOM files using Python
+python3 << 'EOF'
+from pydicom.data import get_testdata_files
+import shutil
+import os
 
-# Or use LIDC-IDRI sample
-wget https://wiki.cancerimagingarchive.net/download/attachments/1966254/LIDC-IDRI-0001.zip
+# Get all test DICOM files
+test_files = get_testdata_files("*.dcm")
 
-# Unzip
-unzip CT-0.zip -d ct-sample/
-# or
-unzip LIDC-IDRI-0001.zip -d lidc-sample/
+# Create output directory
+os.makedirs("pydicom-samples", exist_ok=True)
 
-# Check DICOM files
-find ct-sample/ -name "*.dcm" | head -10
+# Copy sample files
+for i, filepath in enumerate(test_files[:20]):  # Copy first 20 files
+    filename = os.path.basename(filepath)
+    dest = os.path.join("pydicom-samples", filename)
+    shutil.copy(filepath, dest)
+    print(f"Copied: {filename}")
+
+print(f"\nTotal files copied: {len(os.listdir('pydicom-samples'))}")
+EOF
+
+# Verify files
+ls -lh pydicom-samples/
+find pydicom-samples/ -name "*.dcm" | wc -l
 ```
 
-### Option B: Use DICOM Library Sample
+### Option B: Download Public DICOM Datasets from GitHub
+
+**Several public repositories provide sample DICOM files.**
 
 ```bash
-# Download Kaapana test dataset
 cd ~/dicom-samples
 
-git clone https://github.com/pydicom/pydicom.git
-cd pydicom/pydicom/data/test_files/
+# Option B1: Download from pydicom-data repository
+# This contains various test DICOM files used by pydicom
+wget https://github.com/pydicom/pydicom-data/archive/refs/heads/master.zip -O pydicom-data.zip
+unzip pydicom-data.zip
+find pydicom-data-master/ -name "*.dcm" -exec cp {} ./github-samples/ \; 2>/dev/null
+echo "Downloaded $(ls -1 github-samples/*.dcm 2>/dev/null | wc -l) DICOM files"
 
-# List sample DICOM files
-ls -la *.dcm
+# Option B2: Download specific test files from pydicom-data repository
+mkdir -p test-files
+cd test-files
 
-# Copy to working directory
-mkdir -p ~/dicom-samples/test-data
-cp *.dcm ~/dicom-samples/test-data/
+# Download common test files directly (these URLs are stable)
+wget https://raw.githubusercontent.com/pydicom/pydicom-data/master/data_store/data/liver.dcm
+wget https://raw.githubusercontent.com/pydicom/pydicom-data/master/data_store/data/emri_small.dcm
+wget https://raw.githubusercontent.com/pydicom/pydicom-data/master/data_store/data/color-pl.dcm
+wget https://raw.githubusercontent.com/pydicom/pydicom-data/master/data_store/data/liver_j2k.dcm
+
+cd ..
+ls -lh test-files/
+echo "Downloaded $(ls -1 test-files/*.dcm 2>/dev/null | wc -l) DICOM files"
 ```
 
-### Option C: Generate Synthetic DICOM
+### Option C: Download from The Cancer Imaging Archive (TCIA)
+
+**TCIA provides large, real clinical DICOM datasets (requires manual download).**
 
 ```bash
-# Install dicom-generator
+# Note: TCIA download links frequently change and require web browser access
+# Visit: https://www.cancerimagingarchive.net/
+# Browse collections and download datasets manually
+
+# Alternative: Use TCIA REST API (requires registration for API key)
+# For POC testing, use Options A or B above for immediate access
+
+# If you have a TCIA dataset downloaded:
+cd ~/dicom-samples
+# Place your downloaded .zip file here
+unzip your-tcia-dataset.zip -d tcia-sample/
+find tcia-sample/ -name "*.dcm" | head -10
+```
+
+### Option D: Generate Synthetic DICOM
+
+```bash
+# Install required packages
 pip install pydicom pillow numpy
 
 # Create synthetic DICOM script
@@ -330,21 +353,174 @@ sudo apt install -y dcmtk
 dcmsend --version
 ```
 
+### Understanding DICOM Authentication (AE Titles vs Username/Password)
+
+**Important:** DICOM DIMSE uses **Application Entity (AE) Titles** for identification, NOT traditional username/password.
+
+#### How DICOM Authentication Works
+
+**DICOM was designed for trusted hospital networks** where:
+- Security is enforced at the **network level** (firewall, IP whitelisting)
+- Instead of username/password, services identify themselves with **AE Titles**
+- AE Titles are like "service identifiers" rather than credentials
+- The protocol assumes implicit trust if you reach the port
+
+#### Your dcmsend Command Breakdown
+
+```bash
+dcmsend -v kaapana.novairis.site 11112 \
+  --aetitle kp-sample \        # YOUR local client's AE Title (who you are)
+  --call kp-admin \             # TARGET server's AE Title (where you're sending)
+  --scan-directories \
+  --scan-pattern '*.dcm' \
+  --recurse valid-dicom-samples/
+```
+
+**What happens:**
+
+1. **Network Level (Your Real Authentication)**
+   - AWS Security Group allows port 11112 from your IP address
+   - This firewall rule IS the real authentication
+   - Only authorized IPs can reach the service
+
+2. **DICOM Protocol Level (Association Handshake)**
+   - dcmsend sends: "Hi, I'm client `kp-sample`"
+   - dcm4chee responds: "OK, I'm server `kp-admin`, here's the connection"
+   - The AE Titles are exchanged but not validated like passwords
+   - Server just needs to accept the connection
+
+3. **Kaapana Application Level (Project Routing)**
+   - `--call kp-admin` tells Kaapana which project to store data in
+   - This is routing/organizational, not authentication
+
+#### Real-World Analogy
+
+```
+Traditional Web API:
+  POST https://api.example.com/upload
+  Headers: Authorization: Bearer your-secret-token
+  
+DICOM DIMSE:
+  dcmsend kaapana.novairis.site 11112
+  Network Auth: Your IP is whitelisted in firewall
+  DICOM Auth: You provide AE Title "kp-sample" (an ID, not a secret)
+```
+
+#### Verifying Your Configuration
+
+**Check which AE titles dcm4chee accepts:**
+
+```bash
+# Access dcm4chee Admin UI
+# https://kaapana.novairis.site/dcm4chee-arc/ui2/
+# Login: admin / admin
+# Go to: Devices → dcm4chee-arc → Application Entities
+# Should see: DCM4CHEE (or similar)
+```
+
+**Test DICOM connectivity (verify the connection works):**
+
+```bash
+# Test DICOM echo (proves port 11112 is accessible)
+dcmecho -v kaapana.novairis.site 11112
+
+# Expected output:
+# I: Requesting Association
+# I: Association Accepted (Max Send PDV: 16372)
+# I: Sending Echo Request
+# I: Received Echo Response (Success)
+# I: Releasing Association
+```
+
+**If dcmecho works, dcmsend will work too** (assuming valid DICOM files).
+
+#### Why No Password in dcmsend?
+
+- DICOM predates web APIs and modern auth patterns
+- Designed for air-gapped hospital networks (no internet)
+- All nodes are on same trusted network
+- Port access IS the authentication (firewall rules)
+- Modern deployments add TLS encryption for additional security
+
+**For Kaapana on AWS:** Your real authentication is the AWS Security Group rule allowing port 11112 from your IP.
+
+#### About Your Internet-Facing Domain
+
+**Question:** If `kaapana.novairis.site` is internet-facing (not internal), does DICOM protocol still work?
+
+**Answer:** ✅ **YES - DICOM works perfectly with internet-facing domains**
+
+**How it works:**
+
+```
+Internet-Facing Domain + DICOM Protocol:
+┌─────────────────────────────────────┐
+│ Your Machine (any IP on internet)   │
+│              │                       │
+│              ↓ DNS resolves          │
+│       kaapana.novairis.site          │
+│              ↓                       │
+│       54.242.234.24 (Elastic IP)    │
+│              │                       │
+│              ↓ TCP 11112             │
+│       AWS Security Group             │
+│       Allows 0.0.0.0/0 ✓            │
+│              │                       │
+│              ↓ Connection accepted   │
+│       DICOM protocol works ✓        │
+└─────────────────────────────────────┘
+```
+
+**Why this is normal:**
+- DICOM is IP-based, not DNS-based
+- Internet-exposed DICOM services are industry standard
+- Cloud PACS systems commonly run on public IPs
+- Your AWS Security Group controls who can access it
+- DICOM protocol still validates all incoming data
+
+**See also:** `../aws-infra/PORT-11112-FAQ.md` for detailed security analysis
+
+### Filter Valid DICOM Files (Important!)
+
+**Some pydicom test files have non-standard SOP Class UIDs that dcmsend will reject.**
+
+```bash
+# Navigate to your DICOM data directory
+cd ~/dicom-samples
+
+# Create a clean directory with only valid DICOM files
+mkdir -p valid-dicom-samples
+cp pydicom-samples/*.dcm valid-dicom-samples/
+
+# Remove problematic test files that dcmsend won't accept
+rm -f valid-dicom-samples/nested_priv_SQ.dcm
+
+# Verify file count
+ls -1 valid-dicom-samples/*.dcm | wc -l
+# Should show ~18-19 valid files
+```
+
+**Why this is necessary:**
+- `nested_priv_SQ.dcm` has an invalid SOP Class UID (test file for edge cases)
+- dcmsend validates SOP Class UID before transfer
+- Filtering ensures smooth upload without errors
+
 ### Upload DICOM Files to Kaapana
 
 #### Method 1: Direct Upload (From Any Machine)
 
 ```bash
 # Navigate to your DICOM data directory
-cd ~/dicom-samples/ct-sample  # or your DICOM directory
+cd ~/dicom-samples
 
 # Send to admin project with dataset name "poc-test-data"
+# Use the valid-dicom-samples directory instead of pydicom-samples
 dcmsend -v kaapana.novairis.site 11112 \
   --aetitle kp-poc-test-data \
   --call kp-admin \
   --scan-directories \
   --scan-pattern '*.dcm' \
-  --recurse .
+  --recurse valid-dicom-samples/
 
 # Send all DICOM files
 find . -name "*.dcm" -exec dcmsend localhost 11112 -aec DCM4CHEE {} +
@@ -376,7 +552,7 @@ dcmsend -v kaapana.novairis.site 11112 \
   --call kp-test-project \
   --scan-directories \
   --scan-pattern '*.dcm' \
-  --recurse ~/dicom-samples/ct-sample/
+  --recurse ~/dicom-samples/valid-dicom-samples/
 ```
 
 ### Verify Upload in Server Logs
@@ -577,7 +753,7 @@ http://YOUR_ELASTIC_IP/ohif/
 
 ---
 
-## Step 5: Verify Data in dcm4chee Admin UI
+## Step 6: Verify Data in dcm4chee Admin UI
 
 ### Access dcm4chee Admin Console
 
@@ -745,109 +921,3 @@ Verify the following:
 - [ ] Project switching updates Datasets view correctly
 
 ---
-
-## Troubleshooting
-
-### Upload fails via UI
-```bash
-# Check Kaapana UI logs
-kubectl logs -l app=kaapana-ui -n kaapana
-
-# Check ingress logs
-kubectl logs -n ingress -l app.kubernetes.io/name=ingress-nginx
-
-# Verify upload service
-kubectl get svc -n kaapana | grep upload
-```
-
-### dcmsend fails
-```bash
-# Check dcm4chee DICOM service
-kubectl get svc dcm4chee-arc -n kaapana
-
-# Check if port 11112 accessible
-# On AWS: check security group inbound rules
-# Add rule: TCP 11112 from your IP
-
-# Test from AWS server:
-telnet localhost 11112
-# Should connect
-
-# Check dcm4chee logs
-kubectl logs -l app=dcm4chee -n kaapana | grep -i "dicom\|error"
-```
-
-### Studies not appearing in OHIF
-```bash
-# Check OpenSearch connectivity
-kubectl logs -l app=ohif -n kaapana
-
-# Check if metadata indexed
-curl -u admin:admin http://localhost:9200/dicom-*/_search?pretty
-
-# Restart OHIF
-kubectl rollout restart deployment ohif-viewer -n kaapana
-```
-
-### Images not displaying in OHIF
-```bash
-# Check OHIF viewer logs
-kubectl logs -l app=ohif -n kaapana
-
-# Check dcm4chee WADO service
-kubectl port-forward svc/dcm4chee-arc 8080:8080 -n kaapana &
-curl http://localhost:8080/dcm4chee-arc/aets/DCM4CHEE/wado
-kill %1
-
-# Verify study accessible via DICOMweb
-# In browser: http://YOUR_IP/dcm4chee-arc/aets/DCM4CHEE/rs/studies
-```
-
-### OpenSearch not indexing
-```bash
-# Check OpenSearch status
-kubectl get pods -l app=opensearch -n kaapana
-
-# Check indexing service logs
-kubectl logs -l app=kaapana-indexing -n kaapana
-
-# Manually trigger indexing
-# (depends on Kaapana architecture - check workflows)
-```
-
----
-
-## Next Steps
-
-✅ **DICOM data successfully uploaded and verified!**
-
-**Next:** [08-workflow-testing.md](08-workflow-testing.md)
-
-You'll test Airflow workflows and AI processing pipelines (nnU-Net segmentation).
-
----
-
-## Quick Reference
-
-**Upload via dcmsend:**
-```bash
-kubectl port-forward -n kaapana svc/dcm4chee-arc 11112:11112 &
-dcmsend localhost 11112 -aec DCM4CHEE *.dcm
-kill %1
-```
-
-**Check study count:**
-```bash
-curl -u admin:admin http://localhost:9200/dicom-*/_count?pretty
-```
-
-**Access URLs:**
-- OHIF: http://YOUR_IP/ohif/
-- dcm4chee: http://YOUR_IP/dcm4chee-arc/ui2/
-- OpenSearch: http://YOUR_IP/opensearch-dashboards/
-- MinIO: http://YOUR_IP/minio-console/
-
----
-
-**Document Status:** ✅ Complete  
-**Next Document:** 08-workflow-testing.md
