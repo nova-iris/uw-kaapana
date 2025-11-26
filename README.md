@@ -15,7 +15,7 @@ Choose your starting point based on what you want to do:
 `public/kaapana/` → Complete Kaapana platform source code
 
 ### **Test with Sample Data**
-`dicom-samples/` → DICOM file examples for testing
+[nova-iris/dicom-examples](https://github.com/nova-iris/dicom-examples) → DICOM file examples for testing
 
 ---
 
@@ -26,7 +26,7 @@ Choose your starting point based on what you want to do:
 ├── kaapana-setup/      # Setup guides and pre-built artifacts
 │   ├── docs/          # Complete documentation (start here)
 │   └── build/         # Pre-built Helm charts and artifacts
-├── dicom-samples/     # Sample DICOM files for testing
+├── nova-iris/dicom-examples  # Sample DICOM files for testing ([external repo](https://github.com/nova-iris/dicom-examples))
 ├── public/kaapana/    # Full Kaapana source code
 └── CLAUDE.md          # Development guide for Claude Code
 ```

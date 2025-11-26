@@ -1,6 +1,7 @@
 
 public/
 prompts/
+plans
 # dicom-samples/
 
 gitlab-registry.md
