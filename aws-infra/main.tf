@@ -90,7 +90,7 @@ module "ec2" {
 
   name = "${local.project_name}-${local.environment}-instance"
 
-  ami                    = data.aws_ami.ubuntu.id
+  ami                    = "ami-09c63204a7d809e8f" #data.aws_ami.ubuntu.id
   instance_type          = var.instance_type
   key_name               = var.create_key_pair ? var.key_name : null
   subnet_id              = module.vpc.public_subnet_ids[0]

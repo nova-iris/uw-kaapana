@@ -63,31 +63,18 @@ df -h /
 
 ### Option 1: Build from Source Script
 
-**Script Location:** `~/kaapana/build/kaapana-admin-chart/deploy_platform.sh`
-
 ```bash
-# Verify script exists (from build process)
-ls -la ~/kaapana/build/kaapana-admin-chart/deploy_platform.sh
-
-# Should show executable deployment script
-# -rwxr-xr-x 1 ubuntu ubuntu 5432 Oct 15 10:30 deploy_platform.sh
+# Setup Deployment Script
+export DEPLOY_SCRIPT=~/kaapana/build/kaapana-admin-chart/deploy_platform.sh
+ls -la $DEPLOY_SCRIPT
 ```
 
 ### Option 2: Pre-built Images Script
 
-**Script Location:** `~/uw-kaapana/kaapana-setup/build/deploy_platform.sh`
-
 ```bash
-# Clone the setup repository if not already done
-if [ ! -d "$HOME/uw-kaapana" ]; then
-    git clone https://github.com/nova-iris/uw-kaapana.git ~/uw-kaapana
-fi
-
 # Verify script exists
-ls -la ~/uw-kaapana/kaapana-setup/build/deploy_platform.sh
-
-# Should show executable deployment script
-# -rwxr-xr-x 1 ubuntu ubuntu 5432 Oct 15 10:30 deploy_platform.sh
+export DEPLOY_SCRIPT=~/uw-kaapana/kaapana-setup/build/deploy_platform.sh
+ls -la $DEPLOY_SCRIPT
 ```
 
 ### Configure GitLab Registry (Option 2 Only)
@@ -95,21 +82,19 @@ ls -la ~/uw-kaapana/kaapana-setup/build/deploy_platform.sh
 If using pre-built images, configure GitLab registry credentials:
 
 ```bash
-# Create registry credentials file
-mkdir -p ~/.docker
-cat > ~/.docker/config.json <<EOF
-{
-  "auths": {
-    "registry.gitlab.com": {
-      "auth": "$(echo -n 'YOUR_GITLAB_USERNAME:YOUR_GITLAB_TOKEN' | base64)"
-    }
-  }
-}
-EOF
+export REGISTRY_URL="registry.gitlab.com"
+export REGISTRY_USERNAME="<gitlab-username>"
+export REGISTRY_PROJECT="<gitlab-project-name>"
+export REGISTRY_FULL="${REGISTRY_URL}/${REGISTRY_USERNAME}/${REGISTRY_PROJECT}"
+export GITLAB_TOKEN="<gitlab-personal-access-token>"
 
-# Replace:
-# YOUR_GITLAB_USERNAME with your GitLab username
-# YOUR_GITLAB_TOKEN with your GitLab access token (with registry permissions)
+# Login to GitLab registry
+echo "$GITLAB_TOKEN" | docker login $REGISTRY_URL --username $REGISTRY_USERNAME --password-stdin
+# Should show: Login Succeeded
+
+# Helm login
+helm registry login $REGISTRY_URL --username $REGISTRY_USERNAME --password $GITLAB_TOKEN
+# Should show: Login Succeeded
 ```
 
 ---
@@ -118,16 +103,9 @@ EOF
 
 ### Review Deploy Script (Optional)
 
-**For Option 1 (Build from Source):**
 ```bash
 # View script to understand deployment process
-less ~/kaapana/build/kaapana-admin-chart/deploy_platform.sh
-```
-
-**For Option 2 (Pre-built Images):**
-```bash
-# View script to understand deployment process
-less ~/uw-kaapana/kaapana-setup/build/deploy_platform.sh
+less $DEPLOY_SCRIPT
 ```
 
 **Key variables can be edited in the script:**
@@ -142,61 +120,13 @@ less ~/uw-kaapana/kaapana-setup/build/deploy_platform.sh
 
 ## Step 3: Run Deployment Script
 
-### Option 1: Build from Source Deployment
-
 ```bash
-# Navigate to build directory
-cd ~/kaapana/build/kaapana-admin-chart
-
 # Make script executable
-chmod +x deploy_platform.sh
+chmod +x $DEPLOY_SCRIPT
 
 # Run deployment (script will prompt for inputs)
-./deploy_platform.sh
+$DEPLOY_SCRIPT
 ```
-
-### Option 2: Pre-built Images Deployment
-
-```bash
-# Navigate to setup directory
-cd ~/uw-kaapana/kaapana-setup/build
-
-# Make script executable
-chmod +x deploy_platform.sh
-
-# Run deployment (script will prompt for inputs)
-./deploy_platform.sh
-```
-
-### ⚠️ Migration Job Timeout Issue
-
-**Common Problem:** During deployment, you may encounter a migration job timeout:
-
-```
-Waiting for migration job migration to complete...
-Migration job did not complete within 180s
-```
-
-**Solution 1: Increase Timeout Value (Recommended)**
-```bash
-# Edit the deploy_platform.sh script to increase timeout
-nano deploy_platform.sh
-
-# Find the migration timeout value (usually 180)
-# Change to a higher value, like 600 (10 minutes):
-MIGRATION_TIMEOUT=600
-
-# Save and exit (Ctrl+X, Y, Enter)
-```
-
-**Solution 2: Rerun Deployment Script**
-```bash
-# If timeout occurs, simply rerun the script
-./deploy_platform.sh
-# The script will resume from where it left off
-```
-
-**Why this happens:** Migration jobs can take longer on slower systems or with large datasets. Increasing the timeout prevents the script from failing prematurely.
 
 ### Deployment Inputs
 
@@ -219,24 +149,42 @@ The script will ask for:
 #   - Password: Your GitLab access token with registry permissions
 ```
 
+
+### Migration Job Timeout Issue
+
+**Common Problem:** During deployment, you may encounter a migration job timeout:
+
+```
+Waiting for migration job migration to complete...
+Migration job did not complete within 180s
+```
+
+**Solution 1: Increase Timeout Value (Recommended)**
+```bash
+# Edit the deploy_platform.sh script to increase timeout
+nano $DEPLOY_SCRIPT
+
+# Find the migration timeout value (usually 180)
+# Change to a higher value, like 600 (10 minutes):
+MIGRATION_TIMEOUT=600
+
+# Save and exit (Ctrl+X, Y, Enter)
+```
+
+**Solution 2: Rerun Deployment Script**
+```bash
+# If timeout occurs, simply rerun the script
+$DEPLOY_SCRIPT
+# The script will resume from where it left off
+```
+
+**Why this happens:** Migration jobs can take longer on slower systems or with large datasets. Increasing the timeout prevents the script from failing prematurely.
+
 ### Monitor Progress
 
 ```bash
 # Watch pod creation
-watch "kubectl get pods -n kaapana"
-
-# Check deployment log
-tail -f $KAAPANA_DIR/platforms/deploy.log
-```
-
-**Expected deployment output:**
-```
-[INFO] Starting platform deployment...
-[INFO] Loading deployment configuration...
-[INFO] Creating Kubernetes namespaces...
-[INFO] Deploying Helm charts...
-[INFO] Waiting for pods to be ready...
-[INFO] Deployment completed successfully!
+watch "kubectl get pods -A"
 ```
 
 ---
@@ -260,16 +208,6 @@ helm list -n default
 ---
 
 ## Step 5: Access Kaapana UI
-
-### Wait for All Pods Ready
-
-```bash
-# Monitor pod readiness
-watch kubectl get pods -n kaapana
-
-# Once all pods show "1/1 Running", deployment is complete
-# This can take 10-30 minutes on first run
-```
 
 ### Get Access URL
 

@@ -1,3 +1,4 @@
+
 ### Milestone 1 – Environment Preparation & Familiarization ($75)
 Objective: Prepare infrastructure and get comfortable with Kaapana architecture.
 Tasks
@@ -8,7 +9,9 @@ Tasks
 Deliverable:
 * Working Kubernetes environment ready for Kaapana installation
 * Summary notes on Kaapana modules and dependencies
+
 ---
+
 ### Milestone 2 – Base Platform Installation ($125)
 Objective: Install the Kaapana base platform and core services.
 Tasks
@@ -20,10 +23,9 @@ Deliverable:
 * Kaapana base platform successfully deployed
 * Dashboard and Keycloak login accessible
 ---
+
 ### Milestone 3 – Core Modules Configuration ($200)
 Objective: Enable and validate key Kaapana modules.
-
-
 
 Focus modules (from docs):
 

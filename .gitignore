@@ -1,4 +1,6 @@
 
 public/
 prompts/
-dicom-samples/
+# dicom-samples/
+
+gitlab-registry.md

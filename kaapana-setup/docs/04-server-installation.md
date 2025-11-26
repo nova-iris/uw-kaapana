@@ -2,7 +2,6 @@
 
 **Phase:** 3 - Deploy  
 **Duration:** 20-30 minutes (mostly automated)  
-**Prerequisite:** 03-kaapana-build-process.md OR 04-artifact-transfer.md completed
 
 ---
 
@@ -116,6 +115,3 @@ Official Kaapana Server Installation:
 - https://kaapana.readthedocs.io/en/latest/installation_guide/server_installation.html
 
 ---
-
-**Document Status:** ✅ Complete  
-**Next Document:** 06-platform-deployment.md
