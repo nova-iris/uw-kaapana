@@ -6,16 +6,16 @@ A comprehensive medical data analysis platform built for federated learning scen
 
 Choose your starting point based on what you want to do:
 
-### 🚀 **Deploy Kaapana on AWS**
-**📁 `aws-infra/`** → Terraform infrastructure for AWS deployment
-**📁 `kaapana-setup/`** → Complete setup documentation and guides
+### **Deploy Kaapana on AWS**
+`aws-infra/` → Terraform infrastructure for AWS deployment
+`kaapana-setup/` → Complete setup documentation and guides
 
-### 🏗️ **Build from Source**
-**📁 `kaapana-setup/docs/`** → Step-by-step build and deployment guides
-**📁 `public/kaapana/`** → Complete Kaapana platform source code
+### **Build from Source**
+`kaapana-setup/docs/` → Step-by-step build and deployment guides
+`public/kaapana/` → Complete Kaapana platform source code
 
-### 🧪 **Test with Sample Data**
-**📁 `dicom-samples/`** → DICOM file examples for testing
+### **Test with Sample Data**
+`dicom-samples/` → DICOM file examples for testing
 
 ---
 
@@ -37,9 +37,4 @@ Choose your starting point based on what you want to do:
 
 **For infrastructure only:** Use `aws-infra/README.md`
 
-**For development:** See `CLAUDE.md` for development commands and architecture
-
 ---
-
-**Platform Components:** PACS • Workflow Management • DICOM Viewer • Federated Learning • Analytics
-**Tech Stack:** Docker • Kubernetes • Airflow • OpenSearch • MicroK8s
